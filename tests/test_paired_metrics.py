@@ -41,3 +41,8 @@ def test_paired_comparison_rejects_different_program_sets(tmp_path):
 
     with pytest.raises(ValueError, match="Program sets differ"):
         paired_comparison(t, l, tmp_path / "out", n_bootstrap=100)
+
+
+def test_matched_lstm_export_script_imports():
+    import scripts.evaluate_matched_lstm
+    assert callable(scripts.evaluate_matched_lstm.main)
