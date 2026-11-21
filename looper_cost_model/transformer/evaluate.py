@@ -10,7 +10,10 @@ from torch.utils.data import DataLoader
 
 from looper_cost_model.transformer.dataset import TransformerScheduleDataset
 from looper_cost_model.transformer.model import TransformationTransformer
-from looper_cost_model.transformer.runtime import resolve_device
+from looper_cost_model.transformer.runtime import (
+    load_model_state_compatibly,
+    resolve_device,
+)
 
 
 def calculate_metrics(df):
@@ -138,7 +141,7 @@ def main():
 
     model_config = checkpoint.get("model_config", {})
     model = TransformationTransformer(**model_config).to(device)
-    model.load_state_dict(checkpoint["model_state_dict"])
+    load_model_state_compatibly(model, checkpoint["model_state_dict"])
     model.eval()
 
     predictions = []
