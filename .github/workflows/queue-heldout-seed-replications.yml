@@ -1,0 +1,47 @@
+name: Queue held-out seed replications
+
+on:
+  workflow_run:
+    workflows:
+      - LOOPerSet matched Transformer vs LSTM experiment
+    types:
+      - completed
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  dispatch-next-seed:
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch the next fixed-protocol seed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "${HEAD_BRANCH}" in
+            experiment-runner/heldout-ablation-seed42-10epochs)
+              NEXT_BRANCH="experiment-runner/heldout-ablation-seed15-10epochs"
+              NEXT_SEED="15"
+              ;;
+            experiment-runner/heldout-ablation-seed15-10epochs)
+              NEXT_BRANCH="experiment-runner/heldout-ablation-seed2026-10epochs"
+              NEXT_SEED="2026"
+              ;;
+            *)
+              echo "No queued follow-up for branch: ${HEAD_BRANCH}"
+              exit 0
+              ;;
+          esac
+
+          gh workflow run .github/workflows/looperset-matched-comparison.yml \
+            --ref "${NEXT_BRANCH}" \
+            -f epochs=10 \
+            -f train_programs=1000 \
+            -f validation_programs=1000 \
+            -f seed="${NEXT_SEED}"
+          echo "Dispatched seed ${NEXT_SEED} on ${NEXT_BRANCH}"
