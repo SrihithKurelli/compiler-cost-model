@@ -14,7 +14,10 @@ from looper_cost_model.transformer.dataset import (
     read_programs,
 )
 from looper_cost_model.transformer.model import TransformationTransformer
-from looper_cost_model.transformer.runtime import resolve_device
+from looper_cost_model.transformer.runtime import (
+    load_model_state_compatibly,
+    resolve_device,
+)
 
 
 def _program():
@@ -167,3 +170,18 @@ def test_explicit_unavailable_accelerator_fails_loudly():
 
         with pytest.raises(RuntimeError, match="MPS was requested"):
             resolve_device("mps")
+
+
+
+def test_legacy_checkpoint_cls_embedding_is_migrated():
+    model = TransformationTransformer()
+    current = model.state_dict()
+    old_state = dict(current)
+    old_embedding = torch.arange(9 * 128, dtype=torch.float32).reshape(9, 128)
+    old_state["type_embedding.weight"] = old_embedding.clone()
+
+    load_model_state_compatibly(model, old_state)
+
+    migrated = model.type_embedding.weight.detach()
+    assert torch.equal(migrated[:8], old_embedding[:8])
+    assert torch.equal(migrated[9], old_embedding[8])
