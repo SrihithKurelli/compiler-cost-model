@@ -150,6 +150,7 @@ def main():
     if not train_programs:
         raise RuntimeError("Training file contains no programs.")
 
+    train_program_count = len(train_programs)
     context_mean, context_std = calculate_context_statistics(train_programs)
 
     print("Loading training dataset...")
@@ -179,7 +180,7 @@ def main():
     )
 
     print("\nDataset summary")
-    print("Training programs:", len(train_programs))
+    print("Training programs:", train_program_count)
     print("Training schedules:", len(train_dataset))
     print("Validation programs:", valid_dataset.program_count)
     print("Validation schedules:", len(valid_dataset))
