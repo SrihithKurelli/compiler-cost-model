@@ -19,13 +19,13 @@ on:
         required: true
         default: "1000"
         type: choice
-        options: ["100", "300", "1000"]
+        options: ["100", "300", "1000", "5000"]
       validation_programs:
         description: "Candidate validation programs before compatibility filtering"
         required: true
         default: "300"
         type: choice
-        options: ["30", "100", "300"]
+        options: ["30", "100", "300", "1000"]
       seed:
         description: "Reproducible sampling and training seed"
         required: true
