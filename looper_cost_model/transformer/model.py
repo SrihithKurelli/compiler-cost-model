@@ -12,7 +12,7 @@ class TransformationTransformer(nn.Module):
         feedforward_dim=256,
         dropout=0.1,
         max_sequence_length=15,
-        num_transform_types=9,
+        num_transform_types=10,
         max_loop_levels=3,
         max_parameters=3,
     ):
@@ -21,7 +21,7 @@ class TransformationTransformer(nn.Module):
         self.hidden_dim = hidden_dim
 
         # Transformation types:
-        # 0 = padding, 1-7 = transformations, 8 = CLS.
+        # 0 = padding, 1-8 = transformations, 9 = CLS.
         self.type_embedding = nn.Embedding(
             num_transform_types,
             hidden_dim,
