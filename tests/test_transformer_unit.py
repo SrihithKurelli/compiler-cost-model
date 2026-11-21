@@ -43,6 +43,17 @@ def _program():
                     }
                 ],
             },
+            {
+                "execution_times": [1.0],
+                "transformations_list": [
+                    {
+                        "type": "shifting",
+                        "loop_levels": [0],
+                        "parameters": [2],
+                        "computations": ["C0"],
+                    }
+                ],
+            },
         ],
     }
 
@@ -56,7 +67,7 @@ def test_dataset_clips_speedup_and_encodes_identity(tmp_path):
     mean, std = calculate_context_statistics(programs)
     dataset = TransformerScheduleDataset(path, mean, std)
 
-    assert len(dataset) == 2
+    assert len(dataset) == 3
     identity = dataset[0]
     transformed = dataset[1]
 
@@ -71,12 +82,16 @@ def test_dataset_clips_speedup_and_encodes_identity(tmp_path):
     assert transformed["padding_mask"][:2].tolist() == [False, False]
     assert transformed["padding_mask"][2:].all()
 
+    shifting = dataset[2]
+    assert shifting["type_ids"][1].item() == TRANSFORM_TO_ID["shifting"]
+    assert shifting["speedup"].item() == np.float32(1.0)
+
 
 def test_model_forward_and_backward_with_padding():
     batch = {
         "type_ids": torch.tensor([
             [CLS_TOKEN_ID, 0, 0, 0],
-            [CLS_TOKEN_ID, TRANSFORM_TO_ID["tiling"], 0, 0],
+            [CLS_TOKEN_ID, TRANSFORM_TO_ID["shifting"], 0, 0],
         ]),
         "loop_levels": torch.zeros(2, 4, 3),
         "loop_counts": torch.zeros(2, 4, dtype=torch.long),
@@ -120,6 +135,20 @@ def test_dataset_batch_collates_program_names(tmp_path):
 def test_device_resolution_cpu_and_auto():
     assert resolve_device("cpu").type == "cpu"
     assert resolve_device("auto").type in {"cpu", "mps", "cuda"}
+
+
+def test_transform_vocabulary_covers_all_looperset_transformations():
+    expected = {
+        "interchange",
+        "skewing",
+        "tiling",
+        "reversal",
+        "parallelization",
+        "unrolling",
+        "fusion",
+        "shifting",
+    }
+    assert set(TRANSFORM_TO_ID) == expected
 
 
 def test_explicit_unavailable_accelerator_fails_loudly():
