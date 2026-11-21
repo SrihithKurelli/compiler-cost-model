@@ -122,6 +122,11 @@ def main():
     parser.add_argument("--lr", type=float, default=4e-5)
     parser.add_argument("--weight-decay", type=float, default=0.015)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--no-positional-encoding",
+        action="store_true",
+        help="Ablation: remove positional encoding to make the schedule encoder permutation-invariant.",
+    )
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument(
         "--device",
@@ -187,7 +192,10 @@ def main():
     print("Training batches:", len(train_loader))
     print("Validation batches:", len(valid_loader))
 
-    model = TransformationTransformer().to(device)
+    model = TransformationTransformer(
+        use_positional_encoding=not args.no_positional_encoding
+    ).to(device)
+    print("Positional encoding:", "disabled" if args.no_positional_encoding else "enabled")
     optimizer = torch.optim.AdamW(
         model.parameters(),
         lr=args.lr,
@@ -237,6 +245,7 @@ def main():
                     "num_layers": 3,
                     "feedforward_dim": 256,
                     "dropout": 0.1,
+                    "use_positional_encoding": not args.no_positional_encoding,
                 },
             }
             torch.save(checkpoint, output_dir / "best_transformer.pt")
