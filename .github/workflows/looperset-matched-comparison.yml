@@ -200,11 +200,12 @@ jobs:
       - name: Audit held-out test compatibility
         run: |
           python - <<'PY'
+          import os
           from pathlib import Path
           from scripts.audit_lstm_compatibility import audit_split
           audit_split(
               "data/processed/looperset_validation_test_seed314159.jsonl.gz",
-              Path("${OUTPUT_DIR}/audit_test"),
+              Path(os.environ["OUTPUT_DIR"]) / "audit_test",
               "test",
           )
           PY
