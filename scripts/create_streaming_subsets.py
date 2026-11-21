@@ -65,14 +65,16 @@ def main():
     parser.add_argument("--output-dir", default="data/processed")
     parser.add_argument("--train-programs", type=int, default=1000)
     parser.add_argument("--valid-programs", type=int, default=300)
-    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--seed", type=int, default=42, help="Experiment/training seed used in output names")
+    parser.add_argument("--sampling-seed", type=int, default=None, help="Fixed sampling seed; defaults to --seed")
     args = parser.parse_args()
 
     if args.train_programs < 1 or args.valid_programs < 1:
         parser.error("program counts must be positive")
 
-    train, train_total = reservoir_sample(args.train, args.train_programs, args.seed, "train")
-    valid, valid_total = reservoir_sample(args.valid, args.valid_programs, args.seed + 1, "validation")
+    sampling_seed = args.seed if args.sampling_seed is None else args.sampling_seed
+    train, train_total = reservoir_sample(args.train, args.train_programs, sampling_seed, "train")
+    valid, valid_total = reservoir_sample(args.valid, args.valid_programs, sampling_seed + 1, "validation")
 
     train_names = {p["program_name"] for p in train}
     valid_names = {p["program_name"] for p in valid}
