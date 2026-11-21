@@ -209,8 +209,8 @@ Train with `--no-positional-encoding` to run the order ablation:
 
 ```bash
 python -m looper_cost_model.transformer.train \
-  --train ../data/processed/looperset_train_common.jsonl.gz \
-  --valid ../data/processed/looperset_validation_tune_common.jsonl.gz \
+  --train ../data/processed/looperset_train_common_seed42.jsonl.gz \
+  --valid ../data/processed/looperset_validation_tune_common_seed42.jsonl.gz \
   --output ./runs/transformer_orderless \
   --epochs 10 --batch-size 256 --seed 42 --device cpu \
   --no-positional-encoding
