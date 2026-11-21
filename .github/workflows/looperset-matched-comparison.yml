@@ -65,6 +65,25 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
           python -m pip install -e . huggingface_hub pytest
+      - name: Load push-trigger experiment configuration
+        if: github.event_name == 'push'
+        run: |
+          while IFS='=' read -r key value; do
+            [[ -z "$key" || "$key" == \\#* ]] && continue
+            case "$key" in
+              TRAIN_PROGRAMS|VALID_PROGRAMS|EXPERIMENT_SEED|EXPERIMENT_EPOCHS)
+                echo "$key=$value" >> "$GITHUB_ENV"
+                ;;
+              *)
+                echo "Unsupported trigger setting: $key" >&2
+                exit 1
+                ;;
+            esac
+          done < experiment-trigger.txt
+          source <(grep -E '^(TRAIN_PROGRAMS|VALID_PROGRAMS|EXPERIMENT_SEED|EXPERIMENT_EPOCHS)=' experiment-trigger.txt)
+          echo "OUTPUT_DIR=runs/matched_seed${EXPERIMENT_SEED}_${TRAIN_PROGRAMS}_${VALID_PROGRAMS}" >> "$GITHUB_ENV"
+          echo "LSTM_WORK_DIR=runs/lstm_work_seed${EXPERIMENT_SEED}" >> "$GITHUB_ENV"
+
       - name: Record experiment configuration
         run: |
           mkdir -p data/raw data/processed "${OUTPUT_DIR}" "${LSTM_WORK_DIR}"
