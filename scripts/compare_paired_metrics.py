@@ -75,7 +75,7 @@ def paired_comparison(
             "paired_programs": int(len(differences)),
             f"{transformer_suffix}_mean": float(t[valid].mean()),
             f"{lstm_suffix}_mean": float(l[valid].mean()),
-            "mean_difference_transformer_minus_lstm": mean_difference,
+            f"mean_difference_{transformer_suffix}_minus_{lstm_suffix}": mean_difference,
             "bootstrap_95_ci": [float(np.quantile(means, 0.025)), float(np.quantile(means, 0.975))],
             "wilcoxon_signed_rank_p": p_value,
         }
