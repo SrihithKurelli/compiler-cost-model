@@ -5,7 +5,8 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
-from looper_cost_model.transformer.evaluate import calculate_metrics\nfrom looper_cost_model.transformer.dataset import (
+from looper_cost_model.transformer.evaluate import calculate_metrics
+from looper_cost_model.transformer.dataset import (
     CLS_TOKEN_ID,
     MAX_SEQUENCE_LENGTH,
     TRANSFORM_TO_ID,
