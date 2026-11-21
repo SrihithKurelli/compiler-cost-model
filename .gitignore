@@ -20,3 +20,6 @@ LOOPerSet/
 
 # wandb
 wandb/
+
+# Local experiment outputs
+outputs/
