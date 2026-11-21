@@ -61,7 +61,7 @@ def train(model, batches, num_epochs, lr, weight_decay, device, batch_size,
     }
 
     history = []
-    best_mape = math.inf
+    best_program_mape = math.inf
     best_state = None
     start = time.time()
 
@@ -71,8 +71,10 @@ def train(model, batches, num_epochs, lr, weight_decay, device, batch_size,
         for phase in ("train", "val"):
             model.train(phase == "train")
             running_loss = 0.0
+            program_error_sums = {}
+            program_counts = {}
             pbar = tqdm(batches[phase], desc=f"epoch {epoch + 1} [{phase}]")
-            for inputs, labels in pbar:
+            for batch_index, (inputs, labels) in enumerate(pbar):
                 inputs = _move_inputs(inputs, device)
                 labels = labels.to(device)
                 optimizer.zero_grad()
@@ -84,6 +86,19 @@ def train(model, batches, num_epochs, lr, weight_decay, device, batch_size,
                         # Size-weight the gradient so partial batches count proportionally.
                         (batch_mape * labels.shape[0] / batch_size).backward()
                         optimizer.step()
+                    else:
+                        ape = (
+                            torch.abs(labels - outputs) / (labels + 1e-5) * 100.0
+                        )
+                        names = [
+                            attributes[0]
+                            for attributes in batches[phase].attributes[batch_index]
+                        ]
+                        for name, error in zip(names, ape.detach().cpu().tolist()):
+                            program_error_sums[name] = (
+                                program_error_sums.get(name, 0.0) + error
+                            )
+                            program_counts[name] = program_counts.get(name, 0) + 1
                 running_loss += batch_mape.item() * labels.shape[0]
                 pbar.set_description(f"epoch {epoch + 1} [{phase}] MAPE {batch_mape.item():.3f}")
 
@@ -91,21 +106,32 @@ def train(model, batches, num_epochs, lr, weight_decay, device, batch_size,
             if phase == "train":
                 train_mape = epoch_mape
             else:
-                history.append((train_mape, epoch_mape))
-                if epoch_mape <= best_mape:
-                    best_mape = epoch_mape
+                program_mape = float(np.mean([
+                    program_error_sums[name] / program_counts[name]
+                    for name in program_error_sums
+                ]))
+                history.append((train_mape, epoch_mape, program_mape))
+                # Select checkpoints by the same program-weighted validation MAPE used
+                # to select the Transformer checkpoint and reported in final evaluation.
+                if program_mape <= best_program_mape:
+                    best_program_mape = program_mape
                     best_state = copy.deepcopy(model.state_dict())
                     os.makedirs(os.path.dirname(checkpoint_path), exist_ok=True)
                     torch.save(best_state, checkpoint_path)
-                    logger.debug(f"Saved checkpoint to {checkpoint_path}")
+                    logger.debug(f"Saved program-weighted checkpoint to {checkpoint_path}")
                 if wandb_run is not None:
                     wandb_run.log({
-                        "train_mape": train_mape, "val_mape": epoch_mape,
-                        "best_mape": best_mape, "epoch": epoch,
+                        "train_mape": train_mape,
+                        "val_schedule_mape": epoch_mape,
+                        "val_program_mape": program_mape,
+                        "best_program_mape": best_program_mape,
+                        "epoch": epoch,
                     })
                 message = (
                     f"Epoch {epoch + 1}/{num_epochs}: train MAPE {train_mape:.4f}  "
-                    f"val MAPE {epoch_mape:.4f}  best {best_mape:.4f}  "
+                    f"val schedule MAPE {epoch_mape:.4f}  "
+                    f"val program MAPE {program_mape:.4f}  "
+                    f"best program MAPE {best_program_mape:.4f}  "
                     f"time {time.time() - epoch_start:.1f}s"
                 )
                 print(message)
@@ -113,8 +139,14 @@ def train(model, batches, num_epochs, lr, weight_decay, device, batch_size,
                     logger.info(message)
 
     elapsed = time.time() - start
-    logger.info(f"Training complete in {elapsed / 60:.1f}m; best val MAPE {best_mape:.4f}")
-    print(f"Training complete in {elapsed / 60:.1f}m; best val MAPE {best_mape:.4f}")
+    logger.info(
+        f"Training complete in {elapsed / 60:.1f}m; "
+        f"best program-weighted val MAPE {best_program_mape:.4f}"
+    )
+    print(
+        f"Training complete in {elapsed / 60:.1f}m; "
+        f"best program-weighted val MAPE {best_program_mape:.4f}"
+    )
     return history, best_state
 
 
