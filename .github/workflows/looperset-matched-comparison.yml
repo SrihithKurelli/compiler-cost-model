@@ -246,9 +246,8 @@ jobs:
           cp "${LSTM_WORK_DIR}/weights/best_model_matched_lstm_seed${EXPERIMENT_SEED}.pt" "${OUTPUT_DIR}/lstm/"
           cp "${LSTM_WORK_DIR}/logs/"*.log "${OUTPUT_DIR}/lstm/" || true
       - name: Export LSTM per-program predictions and paired comparison
-        env:
-          MATCHED_LSTM_ANALYSIS_DIR: ${{ env.OUTPUT_DIR }}/lstm/analysis
         run: |
+          export MATCHED_LSTM_ANALYSIS_DIR="${OUTPUT_DIR}/lstm/analysis"
           python scripts/evaluate_matched_lstm.py \
             experiment.name=matched_lstm_seed${EXPERIMENT_SEED} \
             experiment.base_path="${LSTM_WORK_DIR}" \
@@ -286,7 +285,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: looperset-matched-comparison-seed${{ github.event.inputs.seed || '42' }}
+          name: looperset-matched-comparison-run-${{ github.run_id }}
           path: |
             ${{ env.OUTPUT_DIR }}
             data/processed/looperset_train_common_seed*.jsonl.gz
