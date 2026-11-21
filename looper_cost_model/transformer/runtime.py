@@ -53,3 +53,31 @@ def resolve_device(requested="auto"):
     raise ValueError(
         f"Unsupported device '{requested}'. Choose auto, cpu, mps, cuda, or cuda:N."
     )
+
+
+def load_model_state_compatibly(model, state_dict):
+    """Load current checkpoints and migrate pre-shifting Transformer checkpoints.
+
+    Before shifting was added, token ID 8 represented CLS. In the current
+    vocabulary token ID 8 is shifting and token ID 9 is CLS. Preserve the
+    old CLS embedding at its new index and leave the new shifting row at the
+    model's fresh initialization.
+    """
+    state_dict = dict(state_dict)
+    old_embedding = state_dict.get("type_embedding.weight")
+    current_embedding = model.state_dict()["type_embedding.weight"]
+
+    if (
+        old_embedding is not None
+        and old_embedding.ndim == 2
+        and current_embedding.ndim == 2
+        and old_embedding.shape[0] + 1 == current_embedding.shape[0]
+        and old_embedding.shape[1] == current_embedding.shape[1]
+    ):
+        migrated = current_embedding.clone()
+        migrated[: old_embedding.shape[0] - 1] = old_embedding[:-1]
+        migrated[-1] = old_embedding[-1]
+        state_dict["type_embedding.weight"] = migrated
+
+    model.load_state_dict(state_dict)
+    return model
