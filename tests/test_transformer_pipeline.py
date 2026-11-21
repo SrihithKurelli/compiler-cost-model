@@ -2,6 +2,8 @@ import gzip
 import json
 import sys
 
+import torch
+
 from looper_cost_model.transformer.evaluate import main as evaluate_main
 from looper_cost_model.transformer.train import main as train_main
 
