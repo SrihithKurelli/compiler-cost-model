@@ -33,7 +33,7 @@ def test_split_file_writes_valid_gzip_jsonl_and_metadata(tmp_path):
     source = tmp_path / "validation.jsonl.gz"
     with gzip.open(source, "wt", encoding="utf-8") as output:
         for i in range(10):
-            output.write(json.dumps(make_program(f"P{i}")) + "\\n")
+            output.write(json.dumps(make_program(f"P{i}")) + "\n")
 
     summary = split_file(source, tmp_path / "out", seed=23)
     assert summary["tuning_programs"] == 5
