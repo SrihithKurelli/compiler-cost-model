@@ -205,16 +205,16 @@ python -m looper_cost_model.transformer.evaluate \
 The evaluator reports schedule/program MAPE, Spearman correlation, nDCG,
 nDCG@5, nDCG@1, top-1 optimal selection, and schedule-selection regret.
 
-Train with \`--no-positional-encoding\` to run the order ablation:
+Train with `--no-positional-encoding` to run the order ablation:
 
-\`\`\`bash
-python -m looper_cost_model.transformer.train \\
-  --train ../data/processed/looperset_train_common.jsonl.gz \\
-  --valid ../data/processed/looperset_validation_tune_common.jsonl.gz \\
-  --output ./runs/transformer_orderless \\
-  --epochs 10 --batch-size 256 --seed 42 --device cpu \\
+```bash
+python -m looper_cost_model.transformer.train \
+  --train ../data/processed/looperset_train_common.jsonl.gz \
+  --valid ../data/processed/looperset_validation_tune_common.jsonl.gz \
+  --output ./runs/transformer_orderless \
+  --epochs 10 --batch-size 256 --seed 42 --device cpu \
   --no-positional-encoding
-\`\`\`
+```
 
 Without positional encodings, the Transformer encoder is permutation-invariant over
 transformation tokens: it retains the multiset of transformation types and their
@@ -224,9 +224,9 @@ this setting so the evaluator reconstructs the correct architecture automaticall
 ### Matched Transformer/LSTM research protocol
 
 The GitHub Actions workflow
-\`.github/workflows/looperset-matched-comparison.yml\` runs reproducible CPU comparisons
+`.github/workflows/looperset-matched-comparison.yml` runs reproducible CPU comparisons
 against the original recursive-LSTM baseline. It pins LOOPerSet v2.1 at revision
-\`d97fc54\`, applies the same compatibility audit and common accepted schedules to both
+`d97fc54`, applies the same compatibility audit and common accepted schedules to both
 models, and records the configuration and artifacts for each run.
 
 The matched workflow uses three program-level partitions:
@@ -249,15 +249,15 @@ tests for prediction, ranking, and schedule-selection metrics. Interpret the pil
 carefully: small candidate samples are feasibility evidence, not a substitute for a
 larger held-out evaluation.
 
-To trigger a run, push an \`experiment-trigger.txt\` file to a branch named
-\`experiment-runner/<name>\` with exactly these four settings:
+To trigger a run, push an `experiment-trigger.txt` file to a branch named
+`experiment-runner/<name>` with exactly these four settings:
 
-\`\`\`text
+```text
 TRAIN_PROGRAMS=1000
 VALID_PROGRAMS=1000
 EXPERIMENT_SEED=42
 EXPERIMENT_EPOCHS=5
-\`\`\`
+```
 
 The validation count is the number of candidates before it is divided equally into tuning
 and held-out test programs. Supported training/validation candidate counts and epoch
