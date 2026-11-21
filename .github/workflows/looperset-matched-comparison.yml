@@ -193,6 +193,24 @@ jobs:
           mkdir -p "${OUTPUT_DIR}/lstm"
           cp "${LSTM_WORK_DIR}/weights/best_model_matched_lstm_seed${EXPERIMENT_SEED}.pt" "${OUTPUT_DIR}/lstm/"
           cp "${LSTM_WORK_DIR}/logs/"*.log "${OUTPUT_DIR}/lstm/" || true
+      - name: Export LSTM per-program predictions and paired comparison
+        env:
+          MATCHED_LSTM_ANALYSIS_DIR: ${{ env.OUTPUT_DIR }}/lstm/analysis
+        run: |
+          python -m looper_cost_model.evaluate \
+            experiment.name=matched_lstm_seed${EXPERIMENT_SEED} \
+            experiment.base_path="${LSTM_WORK_DIR}" \
+            data.train_file="data/processed/looperset_train_common_seed${EXPERIMENT_SEED}.jsonl.gz" \
+            data.valid_file="data/processed/looperset_validation_common_seed${EXPERIMENT_SEED}.jsonl.gz" \
+            data.batch_size=256 data.nb_workers=4 data.min_functions_per_footprint=0 \
+            training.device=cpu training.seed="${EXPERIMENT_SEED}" \
+            eval.weights_path="${LSTM_WORK_DIR}/weights/best_model_matched_lstm_seed${EXPERIMENT_SEED}.pt"
+          python -m looper_cost_model.scripts.evaluate_matched_lstm
+          python scripts/compare_paired_metrics.py \
+            --transformer "${OUTPUT_DIR}/transformer/analysis/transformer_program_metrics.csv" \
+            --lstm "${MATCHED_LSTM_ANALYSIS_DIR}/lstm_program_metrics.csv" \
+            --output "${OUTPUT_DIR}/paired_analysis" \
+            --seed "${EXPERIMENT_SEED}" --bootstrap-resamples 10000
       - name: Write matched comparison summary
         if: always()
         run: |
