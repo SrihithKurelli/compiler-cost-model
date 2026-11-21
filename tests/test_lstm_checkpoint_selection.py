@@ -39,7 +39,7 @@ def test_lstm_validation_checkpoint_metric_is_program_weighted(tmp_path):
             ["program_a", "program_b", "program_b", "program_b"],
         ),
     }
-    _, state = train(
+    history, state = train(
         ConstantPredictor(),
         batches,
         num_epochs=1,
@@ -51,4 +51,5 @@ def test_lstm_validation_checkpoint_metric_is_program_weighted(tmp_path):
     )
 
     assert state is not None
+    assert abs(history[0][2] - 45.0) < 0.01
     assert (tmp_path / "best.pt").exists()
