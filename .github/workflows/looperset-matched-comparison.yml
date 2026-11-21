@@ -149,8 +149,9 @@ jobs:
             | tee "${OUTPUT_DIR}/validation_common_summary.txt"
       - name: Verify common dataset invariants
         run: |
-          python scripts/verify_cleaned_data.py --input "data/processed/looperset_train_common_seed${EXPERIMENT_SEED}.jsonl.gz"
-          python scripts/verify_cleaned_data.py --input "data/processed/looperset_validation_common_seed${EXPERIMENT_SEED}.jsonl.gz"
+          python scripts/verify_cleaned_data.py \
+            --train "data/processed/looperset_train_common_seed${EXPERIMENT_SEED}.jsonl.gz" \
+            --valid "data/processed/looperset_validation_common_seed${EXPERIMENT_SEED}.jsonl.gz"
       - name: Train Transformer on common training data
         run: |
           python -m looper_cost_model.transformer.train \
