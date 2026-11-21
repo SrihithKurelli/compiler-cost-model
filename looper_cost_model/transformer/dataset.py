@@ -16,6 +16,7 @@ TRANSFORMATION_TYPES = [
     "parallelization",
     "unrolling",
     "fusion",
+    "shifting",
 ]
 
 TRANSFORM_TO_ID = {
@@ -88,10 +89,16 @@ def extract_transformation_features(transformation):
     parameter_features = np.zeros(MAX_PARAMETERS, dtype=np.float32)
 
     for i, level in enumerate(loops):
-        loop_features[i] = float(level)
+        numeric_level = float(level)
+        if not math.isfinite(numeric_level) or numeric_level < 0 or not numeric_level.is_integer():
+            raise ValueError(f"Invalid loop level: {level}")
+        loop_features[i] = numeric_level
 
     for i, parameter in enumerate(params):
-        parameter_features[i] = signed_log(parameter)
+        numeric_parameter = float(parameter)
+        if not math.isfinite(numeric_parameter):
+            raise ValueError(f"Invalid transformation parameter: {parameter}")
+        parameter_features[i] = signed_log(numeric_parameter)
 
     return {
         "type_id": TRANSFORM_TO_ID[name],
@@ -118,6 +125,9 @@ def encode_schedule(schedule):
 
 
 def calculate_context_statistics(programs):
+    if not programs:
+        raise ValueError("Cannot calculate context statistics from an empty dataset.")
+
     contexts = np.stack([
         extract_program_context(program)
         for program in programs
@@ -138,14 +148,31 @@ class TransformerScheduleDataset(Dataset):
         context_mean,
         context_std,
         max_transformations=MAX_TRANSFORMATIONS,
+        programs=None,
     ):
-        self.programs = read_programs(path)
+        programs = read_programs(path) if programs is None else programs
+        self.program_count = len(programs)
         self.context_mean = np.asarray(context_mean, dtype=np.float32)
         self.context_std = np.asarray(context_std, dtype=np.float32)
+        if not isinstance(max_transformations, int) or not (
+            0 <= max_transformations <= MAX_TRANSFORMATIONS
+        ):
+            raise ValueError(
+                f"max_transformations must be between 0 and {MAX_TRANSFORMATIONS}"
+            )
+        if self.context_mean.shape != (4,) or self.context_std.shape != (4,):
+            raise ValueError("context_mean and context_std must each have shape (4,)")
+        if (
+            not np.all(np.isfinite(self.context_mean))
+            or not np.all(np.isfinite(self.context_std))
+            or np.any(self.context_std <= 0)
+        ):
+            raise ValueError("Context statistics must be finite with positive standard deviations.")
+
         self.max_transformations = max_transformations
         self.samples = []
 
-        for program in self.programs:
+        for program in programs:
             program_name = program["program_name"]
             initial_time = float(program["initial_execution_time"])
 

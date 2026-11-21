@@ -145,6 +145,78 @@ held-out validation programs, matching the numbers reported in the LOOPer paper.
 runs on small slices reproduce the trends — decreasing validation loss and nDCG well above
 a constant baseline — but not the absolute figures.
 
+## Transformation-sequence Transformer (research extension)
+
+The repository also contains a separate Transformer cost model under
+`looper_cost_model/transformer/`. It consumes the ordered
+`transformations_list` sequence and program-level context, and predicts speedup
+relative to the unoptimized program. The original recursive-LSTM implementation above
+remains unchanged and is retained as the baseline.
+
+The Transformer vocabulary covers all eight transformation types represented by the
+LOOPerSet v2.1 schema: interchange, skewing, tiling, reversal, parallelization,
+unrolling, fusion, and shifting. The target is
+`max(initial_execution_time / execution_time, 0.01)`, matching the lower-bound
+clipping convention used by the LSTM pipeline.
+
+### Data expected by the Transformer
+
+The Transformer loader expects the cleaned JSONL files produced by
+`scripts/clean_looperset.py`: each schedule must have exactly one pooled
+`execution_times` value, and each program must have a valid positive
+`initial_execution_time`. Use the pinned LOOPerSet v2.1 PACT compact source
+revision rather than the moving dataset `main` branch:
+
+- [LOOPerSet v2.1 PACT data at the pinned revision](https://huggingface.co/datasets/Mascinissa/LOOPerSet/tree/d97fc54/data/pact25)
+- Dataset license: CC-BY-4.0.
+
+The Transformer training implementation currently materializes the cleaned split and
+its schedule samples in memory. Start with the 100/1,000/5,000-program pilot subsets;
+do not launch a full 73,000-program run until the memory-efficient data pipeline has
+been completed and profiled.
+
+### Train and evaluate the Transformer
+
+Run these commands from the repository root. Adjust the data paths to wherever the
+cleaned files are stored:
+
+```bash
+python -m looper_cost_model.transformer.train \
+  --train ../data/processed/looperset_train_1000_cleaned.jsonl.gz \
+  --valid ../data/processed/looperset_validation_300_cleaned.jsonl.gz \
+  --output ./runs/transformer_pilot_1000 \
+  --epochs 20 --batch-size 256 --seed 42 --device auto
+```
+
+Device selection supports `auto`, `cpu`, `mps`, `cuda`, and `cuda:N`.
+`auto` prefers CUDA, then Apple MPS, then CPU. Explicitly requested but
+unavailable accelerators raise an error instead of silently falling back.
+
+Evaluate a checkpoint with:
+
+```bash
+python -m looper_cost_model.transformer.evaluate \
+  --data ../data/processed/looperset_validation_300_cleaned.jsonl.gz \
+  --checkpoint ./runs/transformer_pilot_1000/best_transformer.pt \
+  --output ./runs/transformer_pilot_1000/analysis \
+  --device auto
+```
+
+The evaluator reports schedule/program MAPE, Spearman correlation, nDCG,
+nDCG@5, nDCG@1, top-1 optimal selection, and schedule-selection regret.
+
+### Tests
+
+The isolated Transformer unit tests do not require LOOPerSet data:
+
+```bash
+python -m pytest -q
+python -m compileall -q looper_cost_model scripts tests
+```
+
+GitHub Actions runs these checks on pushes to the development branches and on pull
+requests to `main`.
+
 ## Citation
 
 If you use this cost model, please cite the LOOPer paper and the LOOPerSet dataset:
