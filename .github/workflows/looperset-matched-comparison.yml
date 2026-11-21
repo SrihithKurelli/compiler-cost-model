@@ -99,8 +99,10 @@ jobs:
               "VALID_PROGRAMS": valid,
               "EXPERIMENT_SEED": seed,
               "EXPERIMENT_EPOCHS": epochs,
+              "SAMPLING_SEED": "42",
               "OUTPUT_DIR": f"runs/matched_seed{seed}_{train}_{valid}",
               "LSTM_WORK_DIR": f"runs/lstm_work_seed{seed}",
+              "LSTM_EVAL_DIR": f"runs/lstm_eval_seed{seed}",
           }
           with open(os.environ["GITHUB_ENV"], "a") as output:
               for key, value in config.items():
@@ -119,7 +121,7 @@ jobs:
           python -m pip install -e . huggingface_hub pytest
       - name: Record experiment configuration
         run: |
-          mkdir -p data/raw data/processed "${OUTPUT_DIR}" "${LSTM_WORK_DIR}"
+          mkdir -p data/raw data/processed "${OUTPUT_DIR}" "${LSTM_WORK_DIR}" "${LSTM_EVAL_DIR}"
           python - <<'PY'
           import json, os, platform, torch
           from pathlib import Path
@@ -129,7 +131,9 @@ jobs:
               "dataset_revision": os.environ["DATASET_REVISION"],
               "dataset_license": "CC-BY-4.0",
               "candidate_training_programs": int(os.environ["TRAIN_PROGRAMS"]),
-              "candidate_validation_programs": int(os.environ["VALID_PROGRAMS"]),
+              "candidate_validation_programs_before_tune_test_split": int(os.environ["VALID_PROGRAMS"]),
+              "dataset_sampling_seed": int(os.environ["SAMPLING_SEED"]),
+              "validation_protocol": "Program-disjoint tuning and held-out test subsets; test is not used for checkpoint selection",
               "epochs_per_model": int(os.environ["EXPERIMENT_EPOCHS"]),
               "seed": int(os.environ["EXPERIMENT_SEED"]),
               "device": "cpu",
@@ -179,14 +183,31 @@ jobs:
             --output-dir data/processed \
             --train-programs "${TRAIN_PROGRAMS}" \
             --valid-programs "${VALID_PROGRAMS}" \
-            --seed "${EXPERIMENT_SEED}"
+            --seed "${EXPERIMENT_SEED}" \
+            --sampling-seed "${SAMPLING_SEED}"
+      - name: Split validation candidates into tuning and held-out test programs
+        run: |
+          python scripts/split_validation_programs.py \
+            --input "data/processed/looperset_validation_${VALID_PROGRAMS}_remote_seed${EXPERIMENT_SEED}.jsonl.gz" \
+            --output-dir data/processed --seed 314159 --tune-fraction 0.5
       - name: Audit compatibility of both model implementations
         run: |
           mkdir -p "${OUTPUT_DIR}/audit"
           python scripts/audit_lstm_compatibility.py \
             --train "data/processed/looperset_train_${TRAIN_PROGRAMS}_remote_seed${EXPERIMENT_SEED}.jsonl.gz" \
-            --valid "data/processed/looperset_validation_${VALID_PROGRAMS}_remote_seed${EXPERIMENT_SEED}.jsonl.gz" \
+            --valid "data/processed/looperset_validation_tune_seed314159.jsonl.gz" \
             --output "${OUTPUT_DIR}/audit"
+      - name: Audit held-out test compatibility
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from scripts.audit_lstm_compatibility import audit_split
+          audit_split(
+              "data/processed/looperset_validation_test_seed314159.jsonl.gz",
+              Path("${OUTPUT_DIR}/audit_test"),
+              "test",
+          )
+          PY
       - name: Build identical common datasets for both models
         run: |
           python scripts/create_common_datasets.py \
@@ -195,27 +216,35 @@ jobs:
             --output "data/processed/looperset_train_common_seed${EXPERIMENT_SEED}.jsonl.gz" \
             | tee "${OUTPUT_DIR}/train_common_summary.txt"
           python scripts/create_common_datasets.py \
-            --input "data/processed/looperset_validation_${VALID_PROGRAMS}_remote_seed${EXPERIMENT_SEED}.jsonl.gz" \
+            --input "data/processed/looperset_validation_tune_seed314159.jsonl.gz" \
             --audit "${OUTPUT_DIR}/audit/validation_schedules.csv" \
-            --output "data/processed/looperset_validation_common_seed${EXPERIMENT_SEED}.jsonl.gz" \
-            | tee "${OUTPUT_DIR}/validation_common_summary.txt"
+            --output "data/processed/looperset_validation_tune_common_seed${EXPERIMENT_SEED}.jsonl.gz" \
+            | tee "${OUTPUT_DIR}/validation_tune_common_summary.txt"
+          python scripts/create_common_datasets.py \
+            --input "data/processed/looperset_validation_test_seed314159.jsonl.gz" \
+            --audit "${OUTPUT_DIR}/audit_test/test_schedules.csv" \
+            --output "data/processed/looperset_validation_test_common_seed${EXPERIMENT_SEED}.jsonl.gz" \
+            | tee "${OUTPUT_DIR}/validation_test_common_summary.txt"
       - name: Verify common dataset invariants
         run: |
           python scripts/verify_cleaned_data.py \
             --train "data/processed/looperset_train_common_seed${EXPERIMENT_SEED}.jsonl.gz" \
-            --valid "data/processed/looperset_validation_common_seed${EXPERIMENT_SEED}.jsonl.gz"
+            --valid "data/processed/looperset_validation_tune_common_seed${EXPERIMENT_SEED}.jsonl.gz"
+          python scripts/verify_cleaned_data.py \
+            --train "data/processed/looperset_train_common_seed${EXPERIMENT_SEED}.jsonl.gz" \
+            --valid "data/processed/looperset_validation_test_common_seed${EXPERIMENT_SEED}.jsonl.gz"
       - name: Train Transformer on common training data
         run: |
           python -m looper_cost_model.transformer.train \
             --train "data/processed/looperset_train_common_seed${EXPERIMENT_SEED}.jsonl.gz" \
-            --valid "data/processed/looperset_validation_common_seed${EXPERIMENT_SEED}.jsonl.gz" \
+            --valid "data/processed/looperset_validation_tune_common_seed${EXPERIMENT_SEED}.jsonl.gz" \
             --output "${OUTPUT_DIR}/transformer" \
             --epochs "${EXPERIMENT_EPOCHS}" --batch-size 256 \
             --seed "${EXPERIMENT_SEED}" --device cpu
-      - name: Evaluate Transformer on common validation data
+      - name: Evaluate Transformer on held-out test data
         run: |
           python -m looper_cost_model.transformer.evaluate \
-            --data "data/processed/looperset_validation_common_seed${EXPERIMENT_SEED}.jsonl.gz" \
+            --data "data/processed/looperset_validation_test_common_seed${EXPERIMENT_SEED}.jsonl.gz" \
             --checkpoint "${OUTPUT_DIR}/transformer/best_transformer.pt" \
             --output "${OUTPUT_DIR}/transformer/analysis" \
             --batch-size 256 --device cpu \
@@ -226,18 +255,18 @@ jobs:
             experiment.name=matched_lstm_seed${EXPERIMENT_SEED} \
             experiment.base_path="${LSTM_WORK_DIR}" \
             data.train_file="data/processed/looperset_train_common_seed${EXPERIMENT_SEED}.jsonl.gz" \
-            data.valid_file="data/processed/looperset_validation_common_seed${EXPERIMENT_SEED}.jsonl.gz" \
+            data.valid_file="data/processed/looperset_validation_tune_common_seed${EXPERIMENT_SEED}.jsonl.gz" \
             data.batch_size=256 data.nb_workers=4 data.min_functions_per_footprint=0 \
             training.device=cpu training.max_epochs="${EXPERIMENT_EPOCHS}" \
             training.seed="${EXPERIMENT_SEED}" training.lr=0.00004 training.weight_decay=0.015 \
             | tee "${OUTPUT_DIR}/lstm_training.txt"
-      - name: Evaluate original recursive-LSTM baseline on common validation data
+      - name: Evaluate original recursive-LSTM baseline on held-out test data
         run: |
           python -m looper_cost_model.evaluate \
-            experiment.name=matched_lstm_seed${EXPERIMENT_SEED} \
-            experiment.base_path="${LSTM_WORK_DIR}" \
+            experiment.name=matched_lstm_seed${EXPERIMENT_SEED}_heldout \
+            experiment.base_path="${LSTM_EVAL_DIR}" \
             data.train_file="data/processed/looperset_train_common_seed${EXPERIMENT_SEED}.jsonl.gz" \
-            data.valid_file="data/processed/looperset_validation_common_seed${EXPERIMENT_SEED}.jsonl.gz" \
+            data.valid_file="data/processed/looperset_validation_test_common_seed${EXPERIMENT_SEED}.jsonl.gz" \
             data.batch_size=256 data.nb_workers=4 data.min_functions_per_footprint=0 \
             training.device=cpu training.seed="${EXPERIMENT_SEED}" \
             eval.weights_path="${LSTM_WORK_DIR}/weights/best_model_matched_lstm_seed${EXPERIMENT_SEED}.pt" \
@@ -250,9 +279,9 @@ jobs:
           export MATCHED_LSTM_ANALYSIS_DIR="${OUTPUT_DIR}/lstm/analysis"
           python scripts/evaluate_matched_lstm.py \
             experiment.name=matched_lstm_seed${EXPERIMENT_SEED} \
-            experiment.base_path="${LSTM_WORK_DIR}" \
+            experiment.base_path="${LSTM_EVAL_DIR}" \
             data.train_file="data/processed/looperset_train_common_seed${EXPERIMENT_SEED}.jsonl.gz" \
-            data.valid_file="data/processed/looperset_validation_common_seed${EXPERIMENT_SEED}.jsonl.gz" \
+            data.valid_file="data/processed/looperset_validation_test_common_seed${EXPERIMENT_SEED}.jsonl.gz" \
             data.batch_size=256 data.nb_workers=4 data.min_functions_per_footprint=0 \
             training.device=cpu training.seed="${EXPERIMENT_SEED}" \
             eval.weights_path="${LSTM_WORK_DIR}/weights/best_model_matched_lstm_seed${EXPERIMENT_SEED}.pt"
@@ -272,13 +301,20 @@ jobs:
           if not metadata.exists():
               raise SystemExit("Experiment metadata missing; inspect prior step logs")
           report = {"metadata": json.loads(metadata.read_text())}
-          for name in ("train", "validation"):
-              p = out / "audit" / f"{name}_summary.json"
-              if p.exists():
-                  report[f"{name}_compatibility"] = json.loads(p.read_text())
-              p = Path("data/processed") / f"looperset_{name}_common_seed{os.environ['EXPERIMENT_SEED']}.jsonl.gz.summary.json"
-              if p.exists():
-                  report[f"{name}_common_dataset"] = json.loads(p.read_text())
+          audit_entries = [
+              ("train", out / "audit" / "train_summary.json", "train"),
+              ("tuning", out / "audit" / "validation_summary.json", "validation_tune"),
+              ("heldout_test", out / "audit_test" / "test_summary.json", "validation_test"),
+          ]
+          for name, audit_path, dataset_name in audit_entries:
+              if audit_path.exists():
+                  report[f"{name}_compatibility"] = json.loads(audit_path.read_text())
+              summary_path = Path("data/processed") / f"looperset_{dataset_name}_common_seed{os.environ['EXPERIMENT_SEED']}.jsonl.gz.summary.json"
+              if summary_path.exists():
+                  report[f"{name}_common_dataset"] = json.loads(summary_path.read_text())
+          split_report = Path("data/processed/validation_split_seed314159.json")
+          if split_report.exists():
+              report["validation_split"] = json.loads(split_report.read_text())
           (out / "matched_comparison_summary.json").write_text(json.dumps(report, indent=2))
           PY
       - name: Upload matched experiment artifacts
@@ -289,6 +325,8 @@ jobs:
           path: |
             ${{ env.OUTPUT_DIR }}
             data/processed/looperset_train_common_seed*.jsonl.gz
-            data/processed/looperset_validation_common_seed*.jsonl.gz
+            data/processed/looperset_validation_tune_common_seed*.jsonl.gz
+            data/processed/looperset_validation_test_common_seed*.jsonl.gz
+            data/processed/validation_split_seed314159.json
           if-no-files-found: warn
           retention-days: 30
