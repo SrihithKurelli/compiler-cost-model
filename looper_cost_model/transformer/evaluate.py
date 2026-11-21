@@ -59,6 +59,7 @@ def calculate_metrics(df):
 
         results.append({
             "program_name": program_name,
+            "mape": float(group["ape"].mean()),
             "spearman": correlation,
             "ndcg": ndcg,
             "ndcg_at_5": ndcg5,
