@@ -8,10 +8,10 @@ import numpy as np
 import pandas as pd
 import torch
 
-from .config import load_config
-from .data.dataset import load_batches, prepare_dataset
-from .evaluate import predictions_dataframe, score
-from .model import LOOPerCostModel
+from looper_cost_model.config import load_config
+from looper_cost_model.data.dataset import load_batches, prepare_dataset
+from looper_cost_model.evaluate import predictions_dataframe, score
+from looper_cost_model.model import LOOPerCostModel
 
 
 def main():
