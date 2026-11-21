@@ -5,6 +5,7 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
+from looper_cost_model.transformer.evaluate import calculate_metrics
 from looper_cost_model.transformer.dataset import (
     CLS_TOKEN_ID,
     MAX_SEQUENCE_LENGTH,
@@ -185,3 +186,23 @@ def test_legacy_checkpoint_cls_embedding_is_migrated():
     migrated = model.type_embedding.weight.detach()
     assert torch.equal(migrated[:8], old_embedding[:8])
     assert torch.equal(migrated[9], old_embedding[8])
+
+
+def test_transformer_program_metrics_include_program_weighted_mape():
+    import pandas as pd
+
+    frame = pd.DataFrame([
+        {"program_name": "p1", "speedup": 2.0, "prediction": 1.0,
+         "execution_time": 0.5, "ape": 50.0},
+        {"program_name": "p1", "speedup": 1.0, "prediction": 1.0,
+         "execution_time": 1.0, "ape": 0.0},
+        {"program_name": "p2", "speedup": 1.0, "prediction": 0.5,
+         "execution_time": 1.0, "ape": 50.0},
+        {"program_name": "p2", "speedup": 2.0, "prediction": 2.0,
+         "execution_time": 0.5, "ape": 0.0},
+    ])
+    summary, program_metrics = calculate_metrics(frame)
+
+    assert "mape" in program_metrics.columns
+    assert program_metrics["mape"].tolist() == [25.0, 25.0]
+    assert summary["MAPE"] == 25.0
