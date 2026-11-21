@@ -15,10 +15,12 @@ class TransformationTransformer(nn.Module):
         num_transform_types=10,
         max_loop_levels=3,
         max_parameters=3,
+        use_positional_encoding=True,
     ):
         super().__init__()
 
         self.hidden_dim = hidden_dim
+        self.use_positional_encoding = bool(use_positional_encoding)
 
         # Transformation types:
         # 0 = padding, 1-8 = transformations, 9 = CLS.
@@ -142,7 +144,8 @@ class TransformationTransformer(nn.Module):
             device=type_ids.device,
         ).unsqueeze(0)
 
-        x = x + self.position_embedding(positions)
+        if self.use_positional_encoding:
+            x = x + self.position_embedding(positions)
 
         # Add a learned CLS representation at position zero.
         cls = x[:, :1, :] + self.cls_embedding
