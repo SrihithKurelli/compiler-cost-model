@@ -68,6 +68,7 @@ def test_dataset_clips_speedup_and_encodes_identity(tmp_path):
     dataset = TransformerScheduleDataset(path, mean, std)
 
     assert len(dataset) == 3
+    assert dataset.program_count == 1
     identity = dataset[0]
     transformed = dataset[1]
 
