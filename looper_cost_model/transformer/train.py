@@ -1,4 +1,3 @@
-
 import argparse
 import copy
 import json
@@ -16,12 +15,15 @@ from looper_cost_model.transformer.dataset import (
     read_programs,
 )
 from looper_cost_model.transformer.model import TransformationTransformer
+from looper_cost_model.transformer.runtime import resolve_device
 
 
 def set_seed(seed):
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
 
 
 def mape_loss(predictions, targets):
@@ -32,7 +34,6 @@ def mape_loss(predictions, targets):
 
 def run_training_epoch(model, loader, optimizer, device):
     model.train()
-
     total_loss = 0.0
     total_samples = 0
 
@@ -42,38 +43,28 @@ def run_training_epoch(model, loader, optimizer, device):
             for key, value in batch.items()
             if isinstance(value, torch.Tensor)
         }
-
         targets = inputs["speedup"]
-
         optimizer.zero_grad(set_to_none=True)
-
         predictions = model(inputs)
         loss = mape_loss(predictions, targets)
-
         loss.backward()
-
-        torch.nn.utils.clip_grad_norm_(
-            model.parameters(),
-            max_norm=1.0,
-        )
-
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
 
         batch_size = targets.size(0)
         total_loss += loss.item() * batch_size
         total_samples += batch_size
 
+    if total_samples == 0:
+        raise RuntimeError("Training dataset produced no schedules.")
     return total_loss / total_samples
 
 
 @torch.no_grad()
 def evaluate_validation(model, loader, device):
     model.eval()
-
     total_schedule_ape = 0.0
     total_samples = 0
-
-    # Accumulate absolute percentage errors separately per program.
     program_error_sums = {}
     program_counts = {}
 
@@ -83,46 +74,37 @@ def evaluate_validation(model, loader, device):
             for key, value in batch.items()
             if isinstance(value, torch.Tensor)
         }
-
         predictions = model(inputs)
         targets = inputs["speedup"]
-
         ape = (
             torch.abs(targets - predictions)
             / (targets + 1e-5)
             * 100.0
         )
-
         total_schedule_ape += ape.sum().item()
         total_samples += targets.size(0)
 
-        program_names = batch["program_name"]
+        for name, error in zip(batch["program_name"], ape.cpu().tolist()):
+            program_error_sums[name] = program_error_sums.get(name, 0.0) + error
+            program_counts[name] = program_counts.get(name, 0) + 1
 
-        for name, error in zip(program_names, ape.cpu().tolist()):
-            program_error_sums[name] = (
-                program_error_sums.get(name, 0.0) + error
-            )
-            program_counts[name] = (
-                program_counts.get(name, 0) + 1
-            )
+    if total_samples == 0 or not program_error_sums:
+        raise RuntimeError("Validation dataset produced no schedules.")
 
     per_program_mape = [
         program_error_sums[name] / program_counts[name]
         for name in program_error_sums
     ]
-
-    if not per_program_mape:
-        raise RuntimeError("Validation produced no program metrics.")
-
-    schedule_weighted_mape = total_schedule_ape / total_samples
-    program_weighted_mape = float(np.mean(per_program_mape))
-
-    return schedule_weighted_mape, program_weighted_mape
+    return (
+        total_schedule_ape / total_samples,
+        float(np.mean(per_program_mape)),
+    )
 
 
 def main():
-    parser = argparse.ArgumentParser()
-
+    parser = argparse.ArgumentParser(
+        description="Train the LOOPerSet transformation-sequence Transformer."
+    )
     parser.add_argument(
         "--train",
         default="../data/processed/looperset_train_1000_cleaned.jsonl.gz",
@@ -141,52 +123,58 @@ def main():
     parser.add_argument("--weight-decay", type=float, default=0.015)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--num-workers", type=int, default=0)
-
+    parser.add_argument(
+        "--device",
+        default="auto",
+        help="auto, cpu, mps, cuda, or cuda:N (default: auto)",
+    )
     args = parser.parse_args()
 
-    set_seed(args.seed)
+    if args.epochs < 1:
+        parser.error("--epochs must be at least 1")
+    if args.batch_size < 1:
+        parser.error("--batch-size must be at least 1")
+    if args.num_workers < 0:
+        parser.error("--num-workers cannot be negative")
+    if args.lr <= 0:
+        parser.error("--lr must be positive")
 
-    device = torch.device("cpu")
+    set_seed(args.seed)
+    device = resolve_device(args.device)
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     print("Device:", device)
     print("Loading training programs...")
-
     train_programs = read_programs(args.train)
+    if not train_programs:
+        raise RuntimeError("Training file contains no programs.")
 
-    context_mean, context_std = calculate_context_statistics(
-        train_programs
-    )
+    context_mean, context_std = calculate_context_statistics(train_programs)
 
     print("Loading training dataset...")
     train_dataset = TransformerScheduleDataset(
-        args.train,
-        context_mean,
-        context_std,
+        args.train, context_mean, context_std
     )
-
     print("Loading validation dataset...")
     valid_dataset = TransformerScheduleDataset(
-        args.valid,
-        context_mean,
-        context_std,
+        args.valid, context_mean, context_std
     )
 
+    pin_memory = device.type == "cuda"
     train_loader = DataLoader(
         train_dataset,
         batch_size=args.batch_size,
         shuffle=True,
         num_workers=args.num_workers,
-        pin_memory=False,
+        pin_memory=pin_memory,
     )
-
     valid_loader = DataLoader(
         valid_dataset,
         batch_size=args.batch_size,
         shuffle=False,
         num_workers=args.num_workers,
-        pin_memory=False,
+        pin_memory=pin_memory,
     )
 
     print("\nDataset summary")
@@ -198,7 +186,6 @@ def main():
     print("Validation batches:", len(valid_loader))
 
     model = TransformationTransformer().to(device)
-
     optimizer = torch.optim.AdamW(
         model.parameters(),
         lr=args.lr,
@@ -210,18 +197,10 @@ def main():
 
     for epoch in range(1, args.epochs + 1):
         start_time = time.time()
-
-        train_mape = run_training_epoch(
-            model,
-            train_loader,
-            optimizer,
-            device,
+        train_mape = run_training_epoch(model, train_loader, optimizer, device)
+        schedule_valid_mape, program_valid_mape = evaluate_validation(
+            model, valid_loader, device
         )
-
-        schedule_valid_mape, program_valid_mape = (
-            evaluate_validation(model, valid_loader, device)
-        )
-
         elapsed = time.time() - start_time
 
         record = {
@@ -231,7 +210,6 @@ def main():
             "valid_program_mape": program_valid_mape,
             "seconds": elapsed,
         }
-
         history.append(record)
 
         print(
@@ -242,10 +220,8 @@ def main():
             f"Time: {elapsed:.1f}s"
         )
 
-        # Select checkpoints using the same aggregation as final evaluation.
         if program_valid_mape < best_validation_mape:
             best_validation_mape = program_valid_mape
-
             checkpoint = {
                 "model_state_dict": copy.deepcopy(model.state_dict()),
                 "context_mean": context_mean,
@@ -261,15 +237,10 @@ def main():
                     "dropout": 0.1,
                 },
             }
-
-            torch.save(
-                checkpoint,
-                output_dir / "best_transformer.pt",
-            )
-
+            torch.save(checkpoint, output_dir / "best_transformer.pt")
             print("  Saved new best program-weighted checkpoint.")
 
-        with open(output_dir / "history.json", "w") as file:
+        with open(output_dir / "history.json", "w", encoding="utf-8") as file:
             json.dump(history, file, indent=2)
 
     print("\nTraining complete.")
