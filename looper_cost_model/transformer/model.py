@@ -62,8 +62,10 @@ class TransformationTransformer(nn.Module):
             nn.GELU(),
         )
 
-        self.position_embedding = nn.Embedding(
-            max_sequence_length, hidden_dim
+        self.max_sequence_length = max_sequence_length
+        self.position_embedding = (
+            nn.Embedding(max_sequence_length, hidden_dim)
+            if self.use_positional_encoding else None
         )
 
         encoder_layer = nn.TransformerEncoderLayer(
@@ -114,10 +116,10 @@ class TransformationTransformer(nn.Module):
 
         batch_size, sequence_length = type_ids.shape
 
-        if sequence_length > self.position_embedding.num_embeddings:
+        if sequence_length > self.max_sequence_length:
             raise ValueError(
                 f"Sequence length {sequence_length} exceeds "
-                f"maximum {self.position_embedding.num_embeddings}"
+                f"maximum {self.max_sequence_length}"
             )
 
         # Normalize loop indices to approximately [0, 1].
