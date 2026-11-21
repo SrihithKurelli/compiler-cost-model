@@ -2,6 +2,8 @@ import gzip
 import json
 import sys
 
+import torch
+
 from looper_cost_model.transformer.evaluate import main as evaluate_main
 from looper_cost_model.transformer.train import main as train_main
 
@@ -95,3 +97,42 @@ def test_one_epoch_training_and_checkpoint_evaluation(tmp_path, monkeypatch):
 
     assert (evaluation_path / "transformer_predictions.csv").is_file()
     assert (evaluation_path / "transformer_program_metrics.csv").is_file()
+
+    orderless_output = tmp_path / "orderless_run"
+    orderless_evaluation = tmp_path / "orderless_evaluation"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "transformer-train",
+            "--train", str(train_path),
+            "--valid", str(valid_path),
+            "--output", str(orderless_output),
+            "--epochs", "1",
+            "--batch-size", "3",
+            "--device", "cpu",
+            "--seed", "7",
+            "--no-positional-encoding",
+        ],
+    )
+    train_main()
+    orderless_checkpoint = orderless_output / "best_transformer.pt"
+    saved_orderless = torch.load(
+        orderless_checkpoint, map_location="cpu", weights_only=False
+    )
+    assert saved_orderless["model_config"]["use_positional_encoding"] is False
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "transformer-evaluate",
+            "--data", str(valid_path),
+            "--checkpoint", str(orderless_checkpoint),
+            "--output", str(orderless_evaluation),
+            "--batch-size", "3",
+            "--device", "cpu",
+        ],
+    )
+    evaluate_main()
+    assert (orderless_evaluation / "transformer_predictions.csv").is_file()

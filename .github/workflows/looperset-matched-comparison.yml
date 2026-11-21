@@ -134,6 +134,7 @@ jobs:
               "candidate_validation_programs_before_tune_test_split": int(os.environ["VALID_PROGRAMS"]),
               "dataset_sampling_seed": int(os.environ["SAMPLING_SEED"]),
               "validation_protocol": "Program-disjoint tuning and held-out test subsets; test is not used for checkpoint selection",
+              "sequence_order_ablation": "Compare the ordered Transformer against a permutation-invariant Transformer without positional encoding",
               "epochs_per_model": int(os.environ["EXPERIMENT_EPOCHS"]),
               "seed": int(os.environ["EXPERIMENT_SEED"]),
               "device": "cpu",
@@ -291,6 +292,30 @@ jobs:
             --lstm "${MATCHED_LSTM_ANALYSIS_DIR}/lstm_program_metrics.csv" \
             --output "${OUTPUT_DIR}/paired_analysis" \
             --seed "${EXPERIMENT_SEED}" --bootstrap-resamples 10000
+      - name: Train permutation-invariant Transformer ablation
+        run: |
+          python -m looper_cost_model.transformer.train \
+            --train "data/processed/looperset_train_common_seed${EXPERIMENT_SEED}.jsonl.gz" \
+            --valid "data/processed/looperset_validation_tune_common_seed${EXPERIMENT_SEED}.jsonl.gz" \
+            --output "${OUTPUT_DIR}/order_ablation/transformer_orderless" \
+            --epochs "${EXPERIMENT_EPOCHS}" --batch-size 256 \
+            --seed "${EXPERIMENT_SEED}" --device cpu --no-positional-encoding
+      - name: Evaluate permutation-invariant Transformer on held-out test data
+        run: |
+          python -m looper_cost_model.transformer.evaluate \
+            --data "data/processed/looperset_validation_test_common_seed${EXPERIMENT_SEED}.jsonl.gz" \
+            --checkpoint "${OUTPUT_DIR}/order_ablation/transformer_orderless/best_transformer.pt" \
+            --output "${OUTPUT_DIR}/order_ablation/transformer_orderless/analysis" \
+            --batch-size 256 --device cpu
+      - name: Compare ordered and permutation-invariant Transformers
+        run: |
+          python scripts/compare_paired_metrics.py \
+            --transformer "${OUTPUT_DIR}/transformer/analysis/transformer_program_metrics.csv" \
+            --lstm "${OUTPUT_DIR}/order_ablation/transformer_orderless/analysis/transformer_program_metrics.csv" \
+            --transformer-label "Ordered Transformer" \
+            --lstm-label "Orderless Transformer" \
+            --output "${OUTPUT_DIR}/order_ablation/paired_analysis" \
+            --seed "${EXPERIMENT_SEED}" --bootstrap-resamples 10000
       - name: Write matched comparison summary
         if: always()
         run: |
@@ -316,6 +341,9 @@ jobs:
           split_report = Path("data/processed/validation_split_seed314159.json")
           if split_report.exists():
               report["validation_split"] = json.loads(split_report.read_text())
+          order_report = out / "order_ablation" / "paired_analysis" / "paired_comparison.json"
+          if order_report.exists():
+              report["order_ablation"] = json.loads(order_report.read_text())
           (out / "matched_comparison_summary.json").write_text(json.dumps(report, indent=2))
           PY
       - name: Upload matched experiment artifacts

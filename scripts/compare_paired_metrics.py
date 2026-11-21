@@ -20,9 +20,14 @@ METRICS = {
 }
 
 
-def paired_comparison(transformer_path, lstm_path, output_dir, seed=42, n_bootstrap=10000):
+def paired_comparison(
+    transformer_path, lstm_path, output_dir, seed=42, n_bootstrap=10000,
+    transformer_label="Transformer", lstm_label="LSTM",
+):
     transformer = pd.read_csv(transformer_path)
     lstm = pd.read_csv(lstm_path)
+    transformer_suffix = transformer_label.lower().replace(" ", "_")
+    lstm_suffix = lstm_label.lower().replace(" ", "_")
     required = {"program_name", *METRICS.keys()}
     for label, frame in (("Transformer", transformer), ("LSTM", lstm)):
         missing = required - set(frame.columns)
@@ -33,7 +38,7 @@ def paired_comparison(transformer_path, lstm_path, output_dir, seed=42, n_bootst
 
     merged = transformer[list(required)].merge(
         lstm[list(required)], on="program_name", how="outer",
-        suffixes=("_transformer", "_lstm"), indicator=True, validate="one_to_one"
+        suffixes=(f"_{transformer_suffix}", f"_{lstm_suffix}"), indicator=True, validate="one_to_one"
     )
     unmatched = merged.loc[merged["_merge"] != "both", ["program_name", "_merge"]]
     if not unmatched.empty:
@@ -47,12 +52,13 @@ def paired_comparison(transformer_path, lstm_path, output_dir, seed=42, n_bootst
         "programs": int(len(merged)),
         "bootstrap_resamples": int(n_bootstrap),
         "bootstrap_seed": int(seed),
-        "difference_convention": "Transformer minus LSTM; negative favors Transformer for lower-is-better metrics",
+        "model_labels": [transformer_label, lstm_label],
+        "difference_convention": f"{transformer_label} minus {lstm_label}; negative favors the first model for lower-is-better metrics",
         "metrics": {},
     }
     for metric, direction in METRICS.items():
-        t = merged[f"{metric}_transformer"].to_numpy(dtype=float)
-        l = merged[f"{metric}_lstm"].to_numpy(dtype=float)
+        t = merged[f"{metric}_{transformer_suffix}"].to_numpy(dtype=float)
+        l = merged[f"{metric}_{lstm_suffix}"].to_numpy(dtype=float)
         valid = np.isfinite(t) & np.isfinite(l)
         differences = t[valid] - l[valid]
         if len(differences) == 0:
@@ -67,9 +73,9 @@ def paired_comparison(transformer_path, lstm_path, output_dir, seed=42, n_bootst
         report["metrics"][metric] = {
             "direction": direction,
             "paired_programs": int(len(differences)),
-            "transformer_mean": float(t[valid].mean()),
-            "lstm_mean": float(l[valid].mean()),
-            "mean_difference_transformer_minus_lstm": mean_difference,
+            f"{transformer_suffix}_mean": float(t[valid].mean()),
+            f"{lstm_suffix}_mean": float(l[valid].mean()),
+            f"mean_difference_{transformer_suffix}_minus_{lstm_suffix}": mean_difference,
             "bootstrap_95_ci": [float(np.quantile(means, 0.025)), float(np.quantile(means, 0.975))],
             "wilcoxon_signed_rank_p": p_value,
         }
@@ -89,10 +95,13 @@ def main():
     parser.add_argument("--output", required=True)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--bootstrap-resamples", type=int, default=10000)
+    parser.add_argument("--transformer-label", default="Transformer")
+    parser.add_argument("--lstm-label", default="LSTM")
     args = parser.parse_args()
     paired_comparison(
         args.transformer, args.lstm, args.output,
         seed=args.seed, n_bootstrap=args.bootstrap_resamples,
+        transformer_label=args.transformer_label, lstm_label=args.lstm_label,
     )
 
 

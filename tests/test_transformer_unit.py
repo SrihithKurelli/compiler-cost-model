@@ -206,3 +206,49 @@ def test_transformer_program_metrics_include_program_weighted_mape():
     assert "mape" in program_metrics.columns
     assert program_metrics["mape"].tolist() == [25.0, 25.0]
     assert summary["MAPE"] == 25.0
+
+
+def test_transformer_without_positional_encoding_is_permutation_invariant():
+    torch.manual_seed(123)
+    model = TransformationTransformer(
+        max_sequence_length=5,
+        dropout=0.0,
+        use_positional_encoding=False,
+    )
+    model.eval()
+    batch = {
+        "type_ids": torch.tensor([[CLS_TOKEN_ID, 1, 3, 5, 0]]),
+        "loop_levels": torch.tensor([[
+            [0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 0.0, 2.0],
+            [0.0, 0.0, 0.0],
+        ]]),
+        "loop_counts": torch.tensor([[0, 2, 1, 1, 0]]),
+        "parameters": torch.tensor([[
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.5, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0],
+        ]]),
+        "parameter_counts": torch.tensor([[0, 0, 1, 1, 0]]),
+        "computation_counts": torch.tensor([[0.0, 0.0, 0.5, 1.0, 0.0]]),
+        "padding_mask": torch.tensor([[False, False, False, False, True]]),
+        "context": torch.tensor([[0.1, 0.2, 0.3, 0.4]]),
+    }
+    permuted = {}
+    order = torch.tensor([0, 3, 1, 2, 4])
+    for key, value in batch.items():
+        if key in {
+            "type_ids", "loop_levels", "loop_counts", "parameters",
+            "parameter_counts", "computation_counts", "padding_mask",
+        }:
+            permuted[key] = value[:, order]
+        else:
+            permuted[key] = value
+
+    first = model(batch)
+    second = model(permuted)
+    assert torch.allclose(first, second, atol=1e-6, rtol=1e-6)

@@ -46,3 +46,22 @@ def test_paired_comparison_rejects_different_program_sets(tmp_path):
 def test_matched_lstm_export_script_imports():
     import scripts.evaluate_matched_lstm
     assert callable(scripts.evaluate_matched_lstm.main)
+
+
+def test_paired_comparison_supports_custom_model_labels(tmp_path):
+    ordered = tmp_path / "ordered.csv"
+    orderless = tmp_path / "orderless.csv"
+    _metrics(["p1", "p2", "p3"]).to_csv(ordered, index=False)
+    _metrics(["p1", "p2", "p3"], offset=1.0).to_csv(orderless, index=False)
+
+    report = paired_comparison(
+        ordered,
+        orderless,
+        tmp_path / "order_ablation",
+        n_bootstrap=100,
+        transformer_label="Ordered Transformer",
+        lstm_label="Orderless Transformer",
+    )
+    assert report["model_labels"] == ["Ordered Transformer", "Orderless Transformer"]
+    assert "ordered_transformer_mean" in report["metrics"]["mape"]
+    assert "orderless_transformer_mean" in report["metrics"]["mape"]
