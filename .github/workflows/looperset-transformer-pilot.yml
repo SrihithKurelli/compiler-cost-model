@@ -76,24 +76,24 @@ jobs:
         run: |
           mkdir -p data/raw data/processed "${OUTPUT_DIR}"
           python - <<'PY'
-          import json, platform, torch
+          import json, os, platform, torch
           from pathlib import Path
           metadata = {
-              "repository_commit": "${GITHUB_SHA}",
+              "repository_commit": os.environ["GITHUB_SHA"],
               "dataset": "Mascinissa/LOOPerSet",
-              "dataset_revision": "${DATASET_REVISION}",
+              "dataset_revision": os.environ["DATASET_REVISION"],
               "dataset_license": "CC-BY-4.0",
-              "training_programs": int("${TRAIN_PROGRAMS}"),
-              "validation_programs": int("${VALID_PROGRAMS}"),
-              "epochs": int("${EXPERIMENT_EPOCHS}"),
-              "seed": int("${EXPERIMENT_SEED}"),
+              "training_programs": int(os.environ["TRAIN_PROGRAMS"]),
+              "validation_programs": int(os.environ["VALID_PROGRAMS"]),
+              "epochs": int(os.environ["EXPERIMENT_EPOCHS"]),
+              "seed": int(os.environ["EXPERIMENT_SEED"]),
               "device": "cpu",
               "runner": platform.platform(),
               "python": platform.python_version(),
               "pytorch": torch.__version__,
               "comparison_status": "Transformer pilot only; not a matched LSTM comparison",
           }
-          Path("${OUTPUT_DIR}", "experiment_metadata.json").write_text(json.dumps(metadata, indent=2))
+          Path(os.environ["OUTPUT_DIR"], "experiment_metadata.json").write_text(json.dumps(metadata, indent=2))
           print(json.dumps(metadata, indent=2))
           PY
 
@@ -102,7 +102,8 @@ jobs:
           python - <<'PY'
           from huggingface_hub import hf_hub_download
           from pathlib import Path
-          revision = "${DATASET_REVISION}"
+          import os
+          revision = os.environ["DATASET_REVISION"]
           files = [
               "data/pact25/looperset_v2_pact_train_compact.jsonl.gz",
               "data/pact25/looperset_v2_pact_validation_compact.jsonl.gz",
