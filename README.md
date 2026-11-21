@@ -205,6 +205,66 @@ python -m looper_cost_model.transformer.evaluate \
 The evaluator reports schedule/program MAPE, Spearman correlation, nDCG,
 nDCG@5, nDCG@1, top-1 optimal selection, and schedule-selection regret.
 
+Train with \`--no-positional-encoding\` to run the order ablation:
+
+\`\`\`bash
+python -m looper_cost_model.transformer.train \\
+  --train ../data/processed/looperset_train_common.jsonl.gz \\
+  --valid ../data/processed/looperset_validation_tune_common.jsonl.gz \\
+  --output ./runs/transformer_orderless \\
+  --epochs 10 --batch-size 256 --seed 42 --device cpu \\
+  --no-positional-encoding
+\`\`\`
+
+Without positional encodings, the Transformer encoder is permutation-invariant over
+transformation tokens: it retains the multiset of transformation types and their
+numerical features, but cannot use their original sequence positions. Checkpoints store
+this setting so the evaluator reconstructs the correct architecture automatically.
+
+### Matched Transformer/LSTM research protocol
+
+The GitHub Actions workflow
+\`.github/workflows/looperset-matched-comparison.yml\` runs reproducible CPU comparisons
+against the original recursive-LSTM baseline. It pins LOOPerSet v2.1 at revision
+\`d97fc54\`, applies the same compatibility audit and common accepted schedules to both
+models, and records the configuration and artifacts for each run.
+
+The matched workflow uses three program-level partitions:
+
+1. **Training programs** fit model parameters.
+2. **Tuning programs** select the best checkpoint using program-weighted validation MAPE.
+3. **Held-out test programs** are never used for checkpoint selection and are used only
+   for final prediction, ranking, and schedule-selection metrics.
+
+The candidate validation sample is split by program (not by schedule), so all schedules
+belonging to one program stay in the same partition. The split is deterministic, and
+training/validation candidate sampling uses a fixed sampling seed independently of the
+model-training seed. Repeated training seeds therefore use the same sampled programs,
+making seed-to-seed comparisons more interpretable.
+
+Each matched run also trains an orderless Transformer on the same training and tuning
+programs and evaluates it on the same held-out test programs. The paired analysis exports
+per-program differences, 95% bootstrap confidence intervals, and Wilcoxon signed-rank
+tests for prediction, ranking, and schedule-selection metrics. Interpret the pilot results
+carefully: small candidate samples are feasibility evidence, not a substitute for a
+larger held-out evaluation.
+
+To trigger a run, push an \`experiment-trigger.txt\` file to a branch named
+\`experiment-runner/<name>\` with exactly these four settings:
+
+\`\`\`text
+TRAIN_PROGRAMS=1000
+VALID_PROGRAMS=1000
+EXPERIMENT_SEED=42
+EXPERIMENT_EPOCHS=5
+\`\`\`
+
+The validation count is the number of candidates before it is divided equally into tuning
+and held-out test programs. Supported training/validation candidate counts and epoch
+choices are defined in the workflow file. Each run uploads its metadata, audit reports,
+checkpoints, predictions, paired statistics, and split manifest as a GitHub Actions
+artifact.
+
 ### Tests
 
 The isolated Transformer unit tests do not require LOOPerSet data:
