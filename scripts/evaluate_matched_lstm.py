@@ -69,7 +69,7 @@ def main():
         pd.DataFrame(regret_rows), on="program_name", validate="one_to_one"
     )
 
-    output_dir = Path(cfg.experiment.base_path).parent / "matched_lstm_analysis"
+    output_dir = Path(os.environ.get("MATCHED_LSTM_ANALYSIS_DIR", Path(cfg.experiment.base_path).parent / "matched_lstm_analysis"))
     output_dir.mkdir(parents=True, exist_ok=True)
     predictions.rename(columns={"name": "program_name"}).to_csv(
         output_dir / "lstm_predictions.csv", index=False
