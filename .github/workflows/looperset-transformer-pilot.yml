@@ -1,0 +1,176 @@
+name: LOOPerSet remote Transformer pilot
+
+on:
+  workflow_dispatch:
+    inputs:
+      epochs:
+        description: "Training epochs (start with 1; increase after the pilot succeeds)"
+        required: true
+        default: "1"
+        type: choice
+        options:
+          - "1"
+          - "5"
+          - "10"
+          - "20"
+      train_programs:
+        description: "Number of training programs"
+        required: true
+        default: "1000"
+        type: choice
+        options:
+          - "100"
+          - "300"
+          - "1000"
+      validation_programs:
+        description: "Number of validation programs"
+        required: true
+        default: "300"
+        type: choice
+        options:
+          - "30"
+          - "100"
+          - "300"
+      seed:
+        description: "Random seed for reproducible program sampling"
+        required: true
+        default: "42"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: looperset-transformer-pilot
+  cancel-in-progress: false
+
+jobs:
+  transformer-pilot:
+    name: Download, clean, train and evaluate
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      DATASET_REVISION: d97fc54
+      TRAIN_PROGRAMS: ${{ inputs.train_programs }}
+      VALID_PROGRAMS: ${{ inputs.validation_programs }}
+      EXPERIMENT_SEED: ${{ inputs.seed }}
+      EXPERIMENT_EPOCHS: ${{ inputs.epochs }}
+      OUTPUT_DIR: runs/remote_transformer_seed${{ inputs.seed }}_${{ inputs.train_programs }}_${{ inputs.validation_programs }}
+    steps:
+      - name: Check out project
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install CPU PyTorch and project dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e . huggingface_hub
+
+      - name: Record runner and experiment configuration
+        run: |
+          mkdir -p data/raw data/processed "${OUTPUT_DIR}"
+          python - <<'PY'
+          import json, os, platform, torch
+          from pathlib import Path
+          metadata = {
+              "repository_commit": os.environ["GITHUB_SHA"],
+              "dataset": "Mascinissa/LOOPerSet",
+              "dataset_revision": os.environ["DATASET_REVISION"],
+              "dataset_license": "CC-BY-4.0",
+              "training_programs": int(os.environ["TRAIN_PROGRAMS"]),
+              "validation_programs": int(os.environ["VALID_PROGRAMS"]),
+              "epochs": int(os.environ["EXPERIMENT_EPOCHS"]),
+              "seed": int(os.environ["EXPERIMENT_SEED"]),
+              "device": "cpu",
+              "runner": platform.platform(),
+              "python": platform.python_version(),
+              "pytorch": torch.__version__,
+              "comparison_status": "Transformer pilot only; not a matched LSTM comparison",
+          }
+          Path(os.environ["OUTPUT_DIR"], "experiment_metadata.json").write_text(json.dumps(metadata, indent=2))
+          print(json.dumps(metadata, indent=2))
+          PY
+
+      - name: Download pinned LOOPerSet v2.1 compact files
+        run: |
+          python - <<'PY'
+          from huggingface_hub import hf_hub_download
+          from pathlib import Path
+          import os
+          revision = os.environ["DATASET_REVISION"]
+          files = [
+              "data/pact25/looperset_v2_pact_train_compact.jsonl.gz",
+              "data/pact25/looperset_v2_pact_validation_compact.jsonl.gz",
+          ]
+          for filename in files:
+              path = hf_hub_download(
+                  repo_id="Mascinissa/LOOPerSet",
+                  repo_type="dataset",
+                  filename=filename,
+                  revision=revision,
+                  local_dir="data/raw/looperset",
+              )
+              print(f"Downloaded {filename}: {Path(path).stat().st_size:,} bytes")
+          PY
+
+      - name: Clean train split
+        run: |
+          python scripts/clean_looperset.py \
+            --input data/raw/looperset/data/pact25/looperset_v2_pact_train_compact.jsonl.gz \
+            --output data/processed/looperset_train_cleaned.jsonl.gz \
+            --max-programs 100000
+
+      - name: Clean validation split
+        run: |
+          python scripts/clean_looperset.py \
+            --input data/raw/looperset/data/pact25/looperset_v2_pact_validation_compact.jsonl.gz \
+            --output data/processed/looperset_validation_cleaned.jsonl.gz \
+            --max-programs 100000
+
+      - name: Create deterministic memory-bounded program subsets
+        run: |
+          python scripts/create_streaming_subsets.py \
+            --train data/processed/looperset_train_cleaned.jsonl.gz \
+            --valid data/processed/looperset_validation_cleaned.jsonl.gz \
+            --output-dir data/processed \
+            --train-programs "${TRAIN_PROGRAMS}" \
+            --valid-programs "${VALID_PROGRAMS}" \
+            --seed "${EXPERIMENT_SEED}"
+
+      - name: Train Transformer on real LOOPerSet data
+        run: |
+          python -m looper_cost_model.transformer.train \
+            --train "data/processed/looperset_train_${TRAIN_PROGRAMS}_remote_seed${EXPERIMENT_SEED}.jsonl.gz" \
+            --valid "data/processed/looperset_validation_${VALID_PROGRAMS}_remote_seed${EXPERIMENT_SEED}.jsonl.gz" \
+            --output "${OUTPUT_DIR}" \
+            --epochs "${EXPERIMENT_EPOCHS}" \
+            --batch-size 256 \
+            --seed "${EXPERIMENT_SEED}" \
+            --device cpu
+
+      - name: Evaluate best checkpoint
+        run: |
+          python -m looper_cost_model.transformer.evaluate \
+            --data "data/processed/looperset_validation_${VALID_PROGRAMS}_remote_seed${EXPERIMENT_SEED}.jsonl.gz" \
+            --checkpoint "${OUTPUT_DIR}/best_transformer.pt" \
+            --output "${OUTPUT_DIR}/analysis" \
+            --batch-size 256 \
+            --device cpu
+
+      - name: Upload experiment results and sampled datasets
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: looperset-transformer-pilot-seed${{ inputs.seed }}
+          path: |
+            ${{ env.OUTPUT_DIR }}
+            data/processed/looperset_train_*_remote_seed*.jsonl.gz
+            data/processed/looperset_validation_*_remote_seed*.jsonl.gz
+          if-no-files-found: warn
+          retention-days: 30
