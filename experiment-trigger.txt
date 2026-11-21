@@ -1,0 +1,1 @@
+Start the pinned, matched LOOPerSet Transformer vs recursive-LSTM CPU experiment. Seed 42; 1000 candidate train programs; 300 candidate validation programs; 5 epochs per model. This file is only a scoped workflow trigger.
