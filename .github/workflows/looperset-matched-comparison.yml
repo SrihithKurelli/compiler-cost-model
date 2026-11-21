@@ -197,7 +197,7 @@ jobs:
         env:
           MATCHED_LSTM_ANALYSIS_DIR: ${{ env.OUTPUT_DIR }}/lstm/analysis
         run: |
-          python -m looper_cost_model.evaluate \
+          python scripts/evaluate_matched_lstm.py \
             experiment.name=matched_lstm_seed${EXPERIMENT_SEED} \
             experiment.base_path="${LSTM_WORK_DIR}" \
             data.train_file="data/processed/looperset_train_common_seed${EXPERIMENT_SEED}.jsonl.gz" \
@@ -205,7 +205,6 @@ jobs:
             data.batch_size=256 data.nb_workers=4 data.min_functions_per_footprint=0 \
             training.device=cpu training.seed="${EXPERIMENT_SEED}" \
             eval.weights_path="${LSTM_WORK_DIR}/weights/best_model_matched_lstm_seed${EXPERIMENT_SEED}.pt"
-          python -m looper_cost_model.scripts.evaluate_matched_lstm
           python scripts/compare_paired_metrics.py \
             --transformer "${OUTPUT_DIR}/transformer/analysis/transformer_program_metrics.csv" \
             --lstm "${MATCHED_LSTM_ANALYSIS_DIR}/lstm_program_metrics.csv" \
