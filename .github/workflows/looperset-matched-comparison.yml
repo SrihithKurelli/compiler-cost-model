@@ -46,15 +46,67 @@ jobs:
     timeout-minutes: 300
     env:
       DATASET_REVISION: d97fc54
-      TRAIN_PROGRAMS: ${{ github.event.inputs.train_programs || '1000' }}
-      VALID_PROGRAMS: ${{ github.event.inputs.validation_programs || '300' }}
-      EXPERIMENT_SEED: ${{ github.event.inputs.seed || '42' }}
-      EXPERIMENT_EPOCHS: ${{ github.event.inputs.epochs || '5' }}
-      OUTPUT_DIR: runs/matched_seed${{ github.event.inputs.seed || '42' }}_${{ github.event.inputs.train_programs || '1000' }}_${{ github.event.inputs.validation_programs || '300' }}
-      LSTM_WORK_DIR: runs/lstm_work_seed${{ github.event.inputs.seed || '42' }}
     steps:
       - name: Check out project
         uses: actions/checkout@v4
+      - name: Resolve experiment configuration
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          event_name = os.environ["GITHUB_EVENT_NAME"]
+          if event_name == "push":
+              values = {}
+              for line in Path("experiment-trigger.txt").read_text().splitlines():
+                  line = line.strip()
+                  if not line or line.startswith("#"):
+                      continue
+                  key, separator, value = line.partition("=")
+                  if not separator or key in values:
+                      raise ValueError(f"Invalid or duplicate trigger setting: {line}")
+                  values[key.strip()] = value.strip()
+              required = {"TRAIN_PROGRAMS", "VALID_PROGRAMS", "EXPERIMENT_SEED", "EXPERIMENT_EPOCHS"}
+              if set(values) != required:
+                  raise ValueError(f"Trigger settings must be exactly {sorted(required)}")
+              train = values["TRAIN_PROGRAMS"]
+              valid = values["VALID_PROGRAMS"]
+              seed = values["EXPERIMENT_SEED"]
+              epochs = values["EXPERIMENT_EPOCHS"]
+          elif event_name == "workflow_dispatch":
+              event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
+              inputs = event.get("inputs", {})
+              train = inputs.get("train_programs", "1000")
+              valid = inputs.get("validation_programs", "300")
+              seed = inputs.get("seed", "42")
+              epochs = inputs.get("epochs", "5")
+          else:
+              raise ValueError(f"Unsupported workflow event: {event_name}")
+
+          if train not in {"100", "300", "1000", "5000"}:
+              raise ValueError(f"Unsupported training program count: {train}")
+          if valid not in {"30", "100", "300", "1000"}:
+              raise ValueError(f"Unsupported validation program count: {valid}")
+          if epochs not in {"1", "5", "10", "20"}:
+              raise ValueError(f"Unsupported epoch count: {epochs}")
+          if not seed.isdigit() or int(seed) < 0:
+              raise ValueError(f"Seed must be a non-negative integer: {seed}")
+
+          config = {
+              "TRAIN_PROGRAMS": train,
+              "VALID_PROGRAMS": valid,
+              "EXPERIMENT_SEED": seed,
+              "EXPERIMENT_EPOCHS": epochs,
+              "OUTPUT_DIR": f"runs/matched_seed{seed}_{train}_{valid}",
+              "LSTM_WORK_DIR": f"runs/lstm_work_seed{seed}",
+          }
+          with open(os.environ["GITHUB_ENV"], "a") as output:
+              for key, value in config.items():
+                  output.write(f"{key}={value}\n")
+          print(json.dumps(config, indent=2))
+          PY
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -194,9 +246,8 @@ jobs:
           cp "${LSTM_WORK_DIR}/weights/best_model_matched_lstm_seed${EXPERIMENT_SEED}.pt" "${OUTPUT_DIR}/lstm/"
           cp "${LSTM_WORK_DIR}/logs/"*.log "${OUTPUT_DIR}/lstm/" || true
       - name: Export LSTM per-program predictions and paired comparison
-        env:
-          MATCHED_LSTM_ANALYSIS_DIR: ${{ env.OUTPUT_DIR }}/lstm/analysis
         run: |
+          export MATCHED_LSTM_ANALYSIS_DIR="${OUTPUT_DIR}/lstm/analysis"
           python scripts/evaluate_matched_lstm.py \
             experiment.name=matched_lstm_seed${EXPERIMENT_SEED} \
             experiment.base_path="${LSTM_WORK_DIR}" \
@@ -234,7 +285,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: looperset-matched-comparison-seed${{ github.event.inputs.seed || '42' }}
+          name: looperset-matched-comparison-run-${{ github.run_id }}
           path: |
             ${{ env.OUTPUT_DIR }}
             data/processed/looperset_train_common_seed*.jsonl.gz
