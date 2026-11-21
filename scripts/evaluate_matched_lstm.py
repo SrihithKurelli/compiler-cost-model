@@ -54,6 +54,13 @@ def main():
         "nDCG@1": "ndcg_at_1",
     })
 
+    # Match the Transformer evaluator's epsilon-stabilized percentage-error denominator.
+    epsilon_mape = predictions.assign(
+        _ape=np.abs(predictions["target"] - predictions["prediction"])
+        / (predictions["target"] + 1e-5) * 100.0
+    ).groupby("name")["_ape"].mean()
+    program_metrics["mape"] = program_metrics["program_name"].map(epsilon_mape)
+
     regret_rows = []
     for program_name, group in predictions.groupby("name", sort=False):
         times = group["exec_time"].to_numpy(dtype=float)
