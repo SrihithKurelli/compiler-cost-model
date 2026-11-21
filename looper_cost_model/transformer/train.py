@@ -154,8 +154,9 @@ def main():
 
     print("Loading training dataset...")
     train_dataset = TransformerScheduleDataset(
-        args.train, context_mean, context_std
+        args.train, context_mean, context_std, programs=train_programs
     )
+    del train_programs
     print("Loading validation dataset...")
     valid_dataset = TransformerScheduleDataset(
         args.valid, context_mean, context_std
@@ -180,7 +181,7 @@ def main():
     print("\nDataset summary")
     print("Training programs:", len(train_programs))
     print("Training schedules:", len(train_dataset))
-    print("Validation programs:", len(valid_dataset.programs))
+    print("Validation programs:", valid_dataset.program_count)
     print("Validation schedules:", len(valid_dataset))
     print("Training batches:", len(train_loader))
     print("Validation batches:", len(valid_loader))
