@@ -47,7 +47,7 @@ def write_programs(programs, path):
     path.parent.mkdir(parents=True, exist_ok=True)
     with gzip.open(path, "wt", encoding="utf-8") as output:
         for program in programs:
-            output.write(json.dumps(program, separators=(",", ":")) + "\\n")
+            output.write(json.dumps(program, separators=(",", ":")) + "\n")
 
 
 def split_file(input_path, output_dir, seed=314159, tune_fraction=0.5):
