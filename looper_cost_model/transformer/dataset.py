@@ -148,8 +148,10 @@ class TransformerScheduleDataset(Dataset):
         context_mean,
         context_std,
         max_transformations=MAX_TRANSFORMATIONS,
+        programs=None,
     ):
-        self.programs = read_programs(path)
+        programs = read_programs(path) if programs is None else programs
+        self.program_count = len(programs)
         self.context_mean = np.asarray(context_mean, dtype=np.float32)
         self.context_std = np.asarray(context_std, dtype=np.float32)
         if not isinstance(max_transformations, int) or not (
@@ -170,7 +172,7 @@ class TransformerScheduleDataset(Dataset):
         self.max_transformations = max_transformations
         self.samples = []
 
-        for program in self.programs:
+        for program in programs:
             program_name = program["program_name"]
             initial_time = float(program["initial_execution_time"])
 
