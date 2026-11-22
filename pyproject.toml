@@ -18,6 +18,7 @@ dependencies = [
     "sympy",
     "omegaconf",
     "tqdm",
+    "xgboost>=2.0",
 ]
 
 [project.optional-dependencies]
