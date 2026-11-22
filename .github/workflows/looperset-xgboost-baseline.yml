@@ -117,7 +117,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: looperset-xgboost-feature-baseline-\${{ github.run_id }}
+          name: looperset-xgboost-feature-baseline-${{ github.run_id }}
           path: |
             runs/xgboost_feature_baseline
             data/processed/looperset_train_common_seed42.jsonl.gz
