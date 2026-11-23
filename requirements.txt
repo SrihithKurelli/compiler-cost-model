@@ -6,5 +6,6 @@ scikit-learn
 sympy
 omegaconf
 tqdm
+xgboost>=2.0
 # Optional: experiment tracking (enable with wandb.enabled=true)
 # wandb

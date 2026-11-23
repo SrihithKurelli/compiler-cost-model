@@ -1,0 +1,128 @@
+name: LOOPerSet XGBoost feature baseline
+
+on:
+  push:
+    branches: ["experiment/xgboost-feature-baseline"]
+    paths: ["xgboost-trigger.txt"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: looperset-xgboost-feature-baseline
+  cancel-in-progress: false
+
+jobs:
+  xgboost-baseline:
+    name: Train matched XGBoost feature baseline
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    env:
+      DATASET_REVISION: d97fc54
+    steps:
+      - name: Check out project
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - name: Install CPU PyTorch and project dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e . huggingface_hub pytest
+      - name: Download pinned LOOPerSet v2.1 compact files
+        run: |
+          python - <<'PY'
+          from huggingface_hub import hf_hub_download
+          from pathlib import Path
+          revision = "d97fc54"
+          files = [
+              "data/pact25/looperset_v2_pact_train_compact.jsonl.gz",
+              "data/pact25/looperset_v2_pact_validation_compact.jsonl.gz",
+          ]
+          for filename in files:
+              path = hf_hub_download(
+                  repo_id="Mascinissa/LOOPerSet", repo_type="dataset",
+                  filename=filename, revision=revision, local_dir="data/raw/looperset",
+              )
+              print(f"Downloaded {filename}: {Path(path).stat().st_size:,} bytes")
+          PY
+      - name: Clean full train and validation splits
+        run: |
+          python scripts/clean_looperset.py \
+            --input data/raw/looperset/data/pact25/looperset_v2_pact_train_compact.jsonl.gz \
+            --output data/processed/looperset_train_cleaned.jsonl.gz \
+            --max-programs 100000
+          python scripts/clean_looperset.py \
+            --input data/raw/looperset/data/pact25/looperset_v2_pact_validation_compact.jsonl.gz \
+            --output data/processed/looperset_validation_cleaned.jsonl.gz \
+            --max-programs 100000
+      - name: Recreate the fixed candidate samples and program-disjoint split
+        run: |
+          python scripts/create_streaming_subsets.py \
+            --train data/processed/looperset_train_cleaned.jsonl.gz \
+            --valid data/processed/looperset_validation_cleaned.jsonl.gz \
+            --output-dir data/processed \
+            --train-programs 1000 --valid-programs 1000 \
+            --seed 42 --sampling-seed 42
+          python scripts/split_validation_programs.py \
+            --input data/processed/looperset_validation_1000_remote_seed42.jsonl.gz \
+            --output-dir data/processed --seed 314159 --tune-fraction 0.5
+      - name: Audit common compatibility and create matched datasets
+        run: |
+          mkdir -p runs/xgboost_feature_baseline/audit
+          python scripts/audit_lstm_compatibility.py \
+            --train data/processed/looperset_train_1000_remote_seed42.jsonl.gz \
+            --valid data/processed/looperset_validation_tune_seed314159.jsonl.gz \
+            --output runs/xgboost_feature_baseline/audit
+          python - <<'PY'
+          from pathlib import Path
+          from scripts.audit_lstm_compatibility import audit_split
+          audit_split(
+              "data/processed/looperset_validation_test_seed314159.jsonl.gz",
+              Path("runs/xgboost_feature_baseline/audit_test"),
+              "test",
+          )
+          PY
+          python scripts/create_common_datasets.py \
+            --input data/processed/looperset_train_1000_remote_seed42.jsonl.gz \
+            --audit runs/xgboost_feature_baseline/audit/train_schedules.csv \
+            --output data/processed/looperset_train_common_seed42.jsonl.gz
+          python scripts/create_common_datasets.py \
+            --input data/processed/looperset_validation_tune_seed314159.jsonl.gz \
+            --audit runs/xgboost_feature_baseline/audit/validation_schedules.csv \
+            --output data/processed/looperset_validation_tune_common_seed42.jsonl.gz
+          python scripts/create_common_datasets.py \
+            --input data/processed/looperset_validation_test_seed314159.jsonl.gz \
+            --audit runs/xgboost_feature_baseline/audit_test/test_schedules.csv \
+            --output data/processed/looperset_validation_test_common_seed42.jsonl.gz
+          python scripts/verify_cleaned_data.py \
+            --train data/processed/looperset_train_common_seed42.jsonl.gz \
+            --valid data/processed/looperset_validation_tune_common_seed42.jsonl.gz
+          python scripts/verify_cleaned_data.py \
+            --train data/processed/looperset_train_common_seed42.jsonl.gz \
+            --valid data/processed/looperset_validation_test_common_seed42.jsonl.gz
+      - name: Run feature-based XGBoost baseline for three seeds
+        run: |
+          python scripts/train_xgboost_baseline.py \
+            --train data/processed/looperset_train_common_seed42.jsonl.gz \
+            --tune data/processed/looperset_validation_tune_common_seed42.jsonl.gz \
+            --test data/processed/looperset_validation_test_common_seed42.jsonl.gz \
+            --output runs/xgboost_feature_baseline \
+            --seeds 42 15 2026 --rounds 1000 --patience 50
+      - name: Upload XGBoost baseline artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: looperset-xgboost-feature-baseline-results
+          path: |
+            runs/xgboost_feature_baseline
+            data/processed/looperset_train_common_seed42.jsonl.gz
+            data/processed/looperset_validation_tune_common_seed42.jsonl.gz
+            data/processed/looperset_validation_test_common_seed42.jsonl.gz
+            data/processed/validation_split_seed314159.json
+          if-no-files-found: warn
+          retention-days: 30
