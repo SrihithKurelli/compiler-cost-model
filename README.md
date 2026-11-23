@@ -16,8 +16,8 @@ two kinds of features:
   tiling, unrolling, parallelization, shifting, and fusion.
 
 These are embedded bottom-up — sequences of affine transformations and expression
-operations by LSTMs, then computations and loops by a recursive network that follows the
-loop-nest hierarchy — and regressed to a single predicted speedup. The model is trained to
+operations by LSTMs, then computations and loops by a recursive network that follows
+the loop-nest hierarchy — and regressed to a single predicted speedup. The model is trained to
 minimize mean absolute percentage error (MAPE) against measured speedups, defined as
 `initial_execution_time / min(execution_times)`.
 
@@ -265,17 +265,112 @@ choices are defined in the workflow file. Each run uploads its metadata, audit r
 checkpoints, predictions, paired statistics, and split manifest as a GitHub Actions
 artifact.
 
+### Order-agnostic XGBoost feature baseline
+
+The repository also includes an XGBoost regression baseline that predicts schedule
+speedup from an order-agnostic, fixed-length feature representation. Unlike the
+sequence-based Transformer, this baseline does not process the order of transformations.
+Instead, it summarizes the program context and the transformations applied to each
+schedule.
+
+The feature vector contains **252 handcrafted features**, including:
+
+- Program-level context and computation counts.
+- Transformation-type counts and parameter statistics.
+- Loop-level and transformation-parameter aggregates.
+- Pairwise transformation-type co-occurrence features.
+- Aggregate numerical statistics.
+
+The model therefore retains information about which transformations and parameters
+occur in a schedule, but discards their original sequence order. It does not use
+execution time or target-derived values as input features.
+
+The regression target is log speedup, where speedup is computed from the initial
+execution time and the schedule execution time, with the lower bound clipped at
+`0.01`. Schedule weights are adjusted so each program contributes an equal total
+weight during training. Hyperparameters and early stopping are selected using the
+program-level tuning partition.
+
+#### Matched evaluation protocol
+
+The XGBoost baseline uses the same program-disjoint training, tuning, and held-out
+test partitions as the matched Transformer experiment:
+
+| Partition | Programs | Purpose |
+| --- | ---: | --- |
+| Training | 1,000 | Fit model parameters |
+| Tuning | 500 | Select the number of boosting rounds |
+| Held-out test | 500 | Final evaluation only |
+
+The comparison uses common accepted schedules so that the models are evaluated on
+the same candidate schedules. The LOOPerSet source revision used by the experiment
+workflow is pinned to `d97fc54`. Three model seeds (`42`, `15`, and `2026`) are
+used with the same sampled programs and partitions.
+
+Prepare the common accepted-schedule datasets using the repository's existing
+cleaning, compatibility, and matched-split scripts before running the baseline.
+Then run the model from the repository root:
+
+```bash
+python scripts/train_xgboost_baseline.py \
+  --train data/processed/looperset_train_common_seed42.jsonl.gz \
+  --tune data/processed/looperset_validation_tune_common_seed42.jsonl.gz \
+  --test data/processed/looperset_validation_test_common_seed42.jsonl.gz \
+  --output runs/xgboost_feature_baseline \
+  --seeds 42 15 2026 --rounds 1000 --patience 50
+```
+
+The output directory contains per-seed model files, predictions, per-program
+metrics, and summary files. `all_seed_summary.json` aggregates the results across
+the three seeds.
+
+#### Pilot results
+
+The following table reports mean and sample standard deviation across the three
+training seeds on the held-out test programs. The Transformer values are from the
+matched ordered-Transformer experiment.
+
+| Metric | Ordered Transformer | XGBoost feature baseline |
+| --- | ---: | ---: |
+| MAPE (%) ↓ | 56.641 ± 0.998 | 83.01 ± 0.31 |
+| Spearman correlation ↑ | 0.3880 ± 0.0076 | 0.6000 ± 0.0019 |
+| nDCG ↑ | 0.8411 ± 0.0046 | 0.9169 ± 0.0005 |
+| nDCG@5 ↑ | 0.5778 ± 0.0139 | 0.7536 ± 0.0031 |
+| nDCG@1 ↑ | 0.5303 ± 0.0046 | 0.7131 ± 0.0020 |
+| Top-1 optimal selection (%) ↑ | 6.73 ± 0.76 | 14.47 ± 0.46 |
+| Mean regret (%) ↓ | 700.66 ± 25.67 | 100.96 ± 1.92 |
+
+Lower MAPE indicates more accurate numerical speedup predictions. Higher Spearman
+correlation and nDCG indicate better ranking of candidate schedules. Top-1 optimal
+selection measures how often the model's highest-ranked schedule is actually the
+best candidate in the evaluated set. Lower mean regret indicates a smaller performance
+loss from selecting the model's top-ranked schedule instead of the optimal candidate.
+
+In this pilot, the ordered Transformer achieves lower MAPE, while XGBoost achieves
+better ranking metrics and top-1 optimal selection on the sampled held-out programs.
+This illustrates that numerical prediction accuracy and schedule-ranking quality are
+different objectives: a model can be less accurate in its predicted speedup values
+while still ranking candidate schedules more effectively.
+
+These results should be interpreted as **pilot evidence**, not proof that either
+approach is universally better. The evaluation uses 500 held-out programs and three
+training seeds. Broader claims require larger and more diverse held-out evaluations,
+and paired statistical analysis should be considered when comparing models.
+
 ### Tests
 
-The isolated Transformer unit tests do not require LOOPerSet data:
+The isolated unit tests do not require a full LOOPerSet download:
 
 ```bash
 python -m pytest -q
 python -m compileall -q looper_cost_model scripts tests
 ```
 
-GitHub Actions runs these checks on pushes to the development branches and on pull
-requests to `main`.
+The test suite includes tests for the original model, Transformer components,
+and the XGBoost feature representation.
+
+GitHub Actions runs the repository's configured checks on pushes to the development
+branches and on pull requests to `main`.
 
 ## Citation
 
